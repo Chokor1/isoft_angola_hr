@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include isoft_angola_hr *.css
+recursive-include isoft_angola_hr *.csv
+recursive-include isoft_angola_hr *.html
+recursive-include isoft_angola_hr *.ico
+recursive-include isoft_angola_hr *.js
+recursive-include isoft_angola_hr *.json
+recursive-include isoft_angola_hr *.md
+recursive-include isoft_angola_hr *.png
+recursive-include isoft_angola_hr *.py
+recursive-include isoft_angola_hr *.svg
+recursive-include isoft_angola_hr *.txt
+recursive-exclude isoft_angola_hr *.pyc
