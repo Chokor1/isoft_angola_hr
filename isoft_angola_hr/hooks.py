@@ -9,12 +9,17 @@ app_color = "grey"
 app_email = "abbasschokor225@gmail.com"
 app_license = "MIT"
 
+# Installation / migration
+# ------------------------
+after_install = "isoft_angola_hr.isoft_angola_hr.install.after_install"
+after_migrate = "isoft_angola_hr.isoft_angola_hr.install.after_install"
+
 # Includes in <head>
 # ------------------
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/isoft_angola_hr/css/isoft_angola_hr.css"
-# app_include_js = "/assets/isoft_angola_hr/js/isoft_angola_hr.js"
+app_include_js = "/assets/isoft_angola_hr/js/angola_hr_icon.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/isoft_angola_hr/css/isoft_angola_hr.css"

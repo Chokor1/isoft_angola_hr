@@ -1,0 +1,181 @@
+{
+ "actions": [],
+ "creation": "2026-06-29 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "issingle": 1,
+ "field_order": [
+  "default_company",
+  "default_irt_table",
+  "column_break_3",
+  "currency",
+  "social_security_section",
+  "ss_employee_rate",
+  "ss_employer_rate",
+  "column_break_8",
+  "food_allowance_exemption",
+  "transport_allowance_exemption",
+  "standard_daily_hours",
+  "components_section",
+  "enable_productivity_bonus",
+  "enable_overtime",
+  "column_break_14",
+  "enable_adiantamento",
+  "enable_family_allowance",
+  "accounts_section",
+  "payroll_payable_account",
+  "salary_payment_account",
+  "component_accounts_section",
+  "component_accounts"
+ ],
+ "fields": [
+  {
+   "fieldname": "default_company",
+   "fieldtype": "Link",
+   "label": "Default Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "default_irt_table",
+   "fieldtype": "Link",
+   "label": "Default IRT Table",
+   "options": "IRT Table"
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "AOA",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "label": "Currency",
+   "options": "Currency"
+  },
+  {
+   "fieldname": "social_security_section",
+   "fieldtype": "Section Break",
+   "label": "Segurança Social & Exemptions"
+  },
+  {
+   "default": "3",
+   "fieldname": "ss_employee_rate",
+   "fieldtype": "Percent",
+   "label": "Social Security - Employee Rate (%)"
+  },
+  {
+   "default": "8",
+   "fieldname": "ss_employer_rate",
+   "fieldtype": "Percent",
+   "label": "Social Security - Employer Rate (%)"
+  },
+  {
+   "fieldname": "column_break_8",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "30000",
+   "fieldname": "food_allowance_exemption",
+   "fieldtype": "Currency",
+   "label": "Food Allowance Exemption"
+  },
+  {
+   "default": "30000",
+   "fieldname": "transport_allowance_exemption",
+   "fieldtype": "Currency",
+   "label": "Transport Allowance Exemption"
+  },
+  {
+   "default": "8",
+   "fieldname": "standard_daily_hours",
+   "fieldtype": "Float",
+   "label": "Standard Daily Hours (Timesheet)"
+  },
+  {
+   "fieldname": "components_section",
+   "fieldtype": "Section Break",
+   "label": "Enabled Components"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_productivity_bonus",
+   "fieldtype": "Check",
+   "label": "Prémio de Produtividade"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_overtime",
+   "fieldtype": "Check",
+   "label": "Horas Extras"
+  },
+  {
+   "fieldname": "column_break_14",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "1",
+   "fieldname": "enable_adiantamento",
+   "fieldtype": "Check",
+   "label": "Adiantamento"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_family_allowance",
+   "fieldtype": "Check",
+   "label": "Abono de Família"
+  },
+  {
+   "fieldname": "accounts_section",
+   "fieldtype": "Section Break",
+   "label": "Net Pay (Journal Entry)"
+  },
+  {
+   "description": "Credited with the net pay. An Employee's own Payroll Payable Account overrides this.",
+   "fieldname": "payroll_payable_account",
+   "fieldtype": "Link",
+   "label": "Payroll Payable Account",
+   "options": "Account"
+  },
+  {
+   "description": "Bank/Cash account credited when salaries are paid (the Payment Entry). Can be overridden when posting.",
+   "fieldname": "salary_payment_account",
+   "fieldtype": "Link",
+   "label": "Salary Payment Account",
+   "options": "Account"
+  },
+  {
+   "fieldname": "component_accounts_section",
+   "fieldtype": "Section Break",
+   "label": "Account per Component"
+  },
+  {
+   "fieldname": "component_accounts",
+   "fieldtype": "Table",
+   "label": "Component Accounts",
+   "options": "Isoft Component Account"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-06-29 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft HR Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC"
+}
