@@ -56,7 +56,6 @@
    "in_list_view": 1
   },
   {
-   "default": "AOA",
    "fieldname": "currency",
    "fieldtype": "Link",
    "label": "Currency",

@@ -56,7 +56,6 @@
    "fieldtype": "Column Break"
   },
   {
-   "default": "AOA",
    "fieldname": "currency",
    "fieldtype": "Link",
    "label": "Currency",

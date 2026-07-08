@@ -173,14 +173,30 @@ def setup_custom_fields():
 	frappe.db.commit()
 
 
+def ensure_currency(code="AOA"):
+	"""Make sure the app's currency exists on the site, so Currency links resolve on a
+	fresh install (some sites don't ship every ISO currency). Returns the code if present."""
+	if not frappe.db.exists("Currency", code):
+		try:
+			frappe.get_doc({
+				"doctype": "Currency", "currency_name": code, "enabled": 1,
+				"symbol": "Kz" if code == "AOA" else code, "fraction": "Cêntimo", "fraction_units": 100,
+			}).insert(ignore_permissions=True)
+		except Exception:
+			return None
+	return code
+
+
 def seed_defaults():
 	"""Seed the standard Angola IRT table and baseline Settings (idempotent)."""
+	currency = ensure_currency("AOA")
+
 	if not frappe.db.exists("IRT Table", DEFAULT_IRT_TABLE):
 		doc = frappe.get_doc({
 			"doctype": "IRT Table",
 			"title": DEFAULT_IRT_TABLE,
 			"effective_from": "2024-01-01",
-			"currency": "AOA",
+			"currency": currency,  # None if the currency couldn't be created — avoids link errors
 			"brackets": [
 				{
 					"from_amount": fr,
@@ -196,6 +212,9 @@ def seed_defaults():
 
 	settings = frappe.get_single("Isoft HR Settings")
 	changed = False
+	if currency and not settings.currency:
+		settings.currency = currency
+		changed = True
 	if not settings.default_irt_table:
 		settings.default_irt_table = DEFAULT_IRT_TABLE
 		changed = True

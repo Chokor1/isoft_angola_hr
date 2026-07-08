@@ -47,8 +47,7 @@
    "fieldname": "currency",
    "fieldtype": "Link",
    "label": "Currency",
-   "options": "Currency",
-   "default": "AOA"
+   "options": "Currency"
   },
   {
    "default": "0",
