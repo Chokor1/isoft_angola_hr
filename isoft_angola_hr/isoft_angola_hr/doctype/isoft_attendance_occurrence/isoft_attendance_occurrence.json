@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "autoname": "AOC-.#####",
+ "creation": "2026-07-06 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "company",
+  "occurrence_date",
+  "occurrence_type",
+  "hours",
+  "column_break_1",
+  "status",
+  "justification_deadline",
+  "justification_reason",
+  "justification_date",
+  "justification_document",
+  "remarks"
+ ],
+ "fields": [
+  {"fieldname": "employee", "fieldtype": "Link", "label": "Employee", "options": "Employee", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fetch_from": "employee.employee_name", "fieldname": "employee_name", "fieldtype": "Data", "label": "Employee Name", "read_only": 1, "in_list_view": 1},
+  {"fetch_from": "employee.company", "fieldname": "company", "fieldtype": "Link", "label": "Company", "options": "Company"},
+  {"fieldname": "occurrence_date", "fieldtype": "Date", "label": "Occurrence Date", "reqd": 1, "in_list_view": 1, "default": "Today"},
+  {"fieldname": "occurrence_type", "fieldtype": "Select", "label": "Type", "options": "Lateness\nEarly Exit\nPartial Absence\nHalf Day\nFull Day", "reqd": 1, "in_list_view": 1, "default": "Full Day"},
+  {"fieldname": "hours", "fieldtype": "Float", "label": "Missing Hours", "description": "Hours not worked (for Lateness / Early Exit / Partial Absence). Ignored for Half/Full Day."},
+  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
+  {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Pending Justification\nJustified\nUnjustified", "default": "Pending Justification", "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "justification_deadline", "fieldtype": "Date", "label": "Justification Deadline", "read_only": 1},
+  {"fieldname": "justification_reason", "fieldtype": "Link", "label": "Justification Reason", "options": "Isoft Absence Reason"},
+  {"fieldname": "justification_date", "fieldtype": "Date", "label": "Justification Date", "read_only": 1},
+  {"fieldname": "justification_document", "fieldtype": "Attach", "label": "Supporting Document"},
+  {"fieldname": "remarks", "fieldtype": "Small Text", "label": "Remarks"}
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-07-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Attendance Occurrence",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "HR Manager", "share": 1, "write": 1}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

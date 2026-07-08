@@ -10,6 +10,7 @@
   "default_irt_table",
   "column_break_3",
   "currency",
+  "payroll_cycle_start_day",
   "social_security_section",
   "ss_employee_rate",
   "ss_employer_rate",
@@ -17,12 +18,20 @@
   "food_allowance_exemption",
   "transport_allowance_exemption",
   "standard_daily_hours",
+  "overtime_multiplier",
+  "working_days_basis",
+  "standard_working_days",
+  "ferias_rate",
+  "natal_rate",
+  "natal_payment_month",
   "components_section",
   "enable_productivity_bonus",
   "enable_overtime",
+  "enable_family_allowance",
   "column_break_14",
   "enable_adiantamento",
-  "enable_family_allowance",
+  "enable_ferias",
+  "enable_natal",
   "accounts_section",
   "payroll_payable_account",
   "salary_payment_account",
@@ -52,6 +61,13 @@
    "fieldtype": "Link",
    "label": "Currency",
    "options": "Currency"
+  },
+  {
+   "default": "1",
+   "fieldname": "payroll_cycle_start_day",
+   "fieldtype": "Int",
+   "label": "Payroll Cycle Start Day",
+   "description": "Day the payroll period starts. 1 = calendar month. 23 = period runs from day 23 of the previous month to day 22 of the current month."
   },
   {
    "fieldname": "social_security_section",
@@ -93,6 +109,51 @@
    "label": "Standard Daily Hours (Timesheet)"
   },
   {
+   "default": "2",
+   "fieldname": "overtime_multiplier",
+   "fieldtype": "Float",
+   "label": "Overtime Multiplier",
+   "description": "Overtime = (daily salary ÷ normal daily hours) × this factor × overtime hours. Default 2×."
+  },
+  {
+   "default": "Auto (Holiday List)",
+   "fieldname": "working_days_basis",
+   "fieldtype": "Select",
+   "label": "Working Days Basis",
+   "options": "Auto (Holiday List)\nStandard (Fixed)",
+   "description": "Auto: calendar days minus holidays (and, with Validate Attendance, minus absences/unpaid leave). Standard: a fixed number of working days."
+  },
+  {
+   "default": "30",
+   "fieldname": "standard_working_days",
+   "fieldtype": "Float",
+   "label": "Standard Working Days",
+   "depends_on": "eval:doc.working_days_basis=='Standard (Fixed)'",
+   "description": "Fixed total working days used when the basis is Standard."
+  },
+  {
+   "default": "50",
+   "fieldname": "ferias_rate",
+   "fieldtype": "Percent",
+   "label": "Subsídio de Férias (% of Base)",
+   "description": "Vacation Allowance as a % of base salary. Excluded from the INSS base."
+  },
+  {
+   "default": "50",
+   "fieldname": "natal_rate",
+   "fieldtype": "Percent",
+   "label": "Subsídio de Natal (% of Base)",
+   "description": "Christmas Allowance as a % of base salary. Paid in the configured Natal Payment Month (13th month); included in the INSS base."
+  },
+  {
+   "default": "December",
+   "fieldname": "natal_payment_month",
+   "fieldtype": "Select",
+   "label": "Natal Payment Month",
+   "options": "January\nFebruary\nMarch\nApril\nMay\nJune\nJuly\nAugust\nSeptember\nOctober\nNovember\nDecember",
+   "description": "The payroll period that ends in this month includes the Subsídio de Natal (default December)."
+  },
+  {
    "fieldname": "components_section",
    "fieldtype": "Section Break",
    "label": "Enabled Components"
@@ -110,6 +171,12 @@
    "label": "Horas Extras"
   },
   {
+   "default": "0",
+   "fieldname": "enable_family_allowance",
+   "fieldtype": "Check",
+   "label": "Abono de Família"
+  },
+  {
    "fieldname": "column_break_14",
    "fieldtype": "Column Break"
   },
@@ -121,9 +188,15 @@
   },
   {
    "default": "0",
-   "fieldname": "enable_family_allowance",
+   "fieldname": "enable_ferias",
    "fieldtype": "Check",
-   "label": "Abono de Família"
+   "label": "Subsídio de Férias"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_natal",
+   "fieldtype": "Check",
+   "label": "Subsídio de Natal"
   },
   {
    "fieldname": "accounts_section",

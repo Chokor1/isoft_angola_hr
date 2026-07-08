@@ -63,6 +63,8 @@ class IsoftPayrollEntry(Document):
 				"productivity_bonus": flt(row.productivity_bonus),
 				"overtime_amount": flt(row.overtime_amount),
 				"adiantamento": flt(row.adiantamento),
+				"subsidio_ferias": flt(row.subsidio_ferias),
+				"subsidio_natal": flt(row.subsidio_natal),
 				"validate_attendance": self.validate_attendance,
 				"based_on_timesheet": self.based_on_timesheet,
 			})

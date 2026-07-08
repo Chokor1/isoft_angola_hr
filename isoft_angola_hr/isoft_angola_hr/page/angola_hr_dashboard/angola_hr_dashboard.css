@@ -176,6 +176,9 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 .pv-scroll thead th { position: sticky; top: 0; z-index: 2; }
 .pv-table .pv-c { width: 36px; text-align: center; }
 .pv-table .pv-sub { font-size: 10.5px; color: var(--ahr-muted); margin-top: 2px; }
+.pv-table .pv-ferias-lbl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; justify-content: flex-end; }
+.pv-table .pv-ferias-amt { font-variant-numeric: tabular-nums; }
+.pv-table .pv-natal { max-width: 110px; text-align: right; }
 .pv-table tr.pv-off { opacity: .42; }
 .pv-table tr.pv-off input.pv-f { background: var(--ahr-tint); }
 

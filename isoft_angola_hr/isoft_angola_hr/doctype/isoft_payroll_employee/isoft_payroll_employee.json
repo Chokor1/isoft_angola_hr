@@ -12,6 +12,8 @@
   "productivity_bonus",
   "overtime_amount",
   "adiantamento",
+  "subsidio_ferias",
+  "subsidio_natal",
   "salary_slip",
   "net_pay"
  ],
@@ -22,6 +24,8 @@
   {"columns": 1, "fieldname": "productivity_bonus", "fieldtype": "Currency", "in_list_view": 1, "label": "Prémio"},
   {"columns": 1, "fieldname": "overtime_amount", "fieldtype": "Currency", "in_list_view": 1, "label": "H. Extras"},
   {"columns": 1, "fieldname": "adiantamento", "fieldtype": "Currency", "in_list_view": 1, "label": "Adiant."},
+  {"fieldname": "subsidio_ferias", "fieldtype": "Currency", "label": "Subsídio de Férias"},
+  {"fieldname": "subsidio_natal", "fieldtype": "Currency", "label": "Subsídio de Natal"},
   {"columns": 2, "fieldname": "salary_slip", "fieldtype": "Link", "in_list_view": 1, "label": "Salary Slip", "options": "Isoft Salary Slip", "read_only": 1},
   {"columns": 2, "fieldname": "net_pay", "fieldtype": "Currency", "in_list_view": 1, "label": "Net Pay", "read_only": 1}
  ],

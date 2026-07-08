@@ -140,10 +140,32 @@ PAYSLIP_HTML = """
 """
 
 
+DEFAULT_ABSENCE_REASONS = [
+	"Doença",
+	"Assistência médica",
+	"Acompanhamento de familiar",
+	"Falecimento de familiar",
+	"Casamento",
+	"Comparência judicial",
+	"Maternidade / Paternidade",
+	"Motivo pessoal",
+]
+
+
 def after_install():
 	setup_custom_fields()
 	seed_defaults()
+	seed_absence_reasons()
 	create_payslip_print_format()
+
+
+def seed_absence_reasons():
+	for reason in DEFAULT_ABSENCE_REASONS:
+		if not frappe.db.exists("Isoft Absence Reason", reason):
+			frappe.get_doc({"doctype": "Isoft Absence Reason", "reason": reason, "is_active": 1}).insert(
+				ignore_permissions=True
+			)
+	frappe.db.commit()
 
 
 def setup_custom_fields():

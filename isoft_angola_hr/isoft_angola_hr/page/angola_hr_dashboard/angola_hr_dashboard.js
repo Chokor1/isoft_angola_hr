@@ -42,6 +42,7 @@ const NAV = [
 	{ key: "overview", label: "Overview", icon: "fa-th-large" },
 	{ key: "employees", label: "Employees", icon: "fa-users" },
 	{ key: "attendance", label: "Attendance", icon: "fa-calendar-check-o" },
+	{ key: "occurrences", label: "Occurrences", icon: "fa-exclamation-triangle" },
 	{ key: "timesheets", label: "Timesheets", icon: "fa-list-alt" },
 	{ key: "profiles", label: "Salary Profiles", icon: "fa-id-card-o" },
 	{ key: "payroll", label: "Payroll", icon: "fa-cogs" },
@@ -52,6 +53,7 @@ const NAV = [
 			{ key: "settings", label: "General", icon: "fa-cog" },
 			{ key: "holidays", label: "Holiday Lists", icon: "fa-calendar-o" },
 			{ key: "shifts", label: "Shift Types", icon: "fa-clock-o" },
+			{ key: "reasons", label: "Absence Reasons", icon: "fa-list-ul" },
 			{ key: "irt", label: "IRT Table", icon: "fa-percent" },
 		],
 	},
@@ -171,6 +173,7 @@ class AngolaHR {
 			this.state.companies = o.companies || [];
 			this.state.company = o.company;
 			this.state.currency = o.currency || "AOA";
+			this.state.default_period = o.default_period || null;
 			this.$company.empty();
 			this.$company.append(`<option value="">${__("All Companies")}</option>`);
 			this.state.companies.forEach((c) =>
@@ -640,6 +643,185 @@ class AngolaHR {
 		d.show();
 	}
 
+	// ---- Attendance Occurrences ----
+	occStatus(status) {
+		const cls = { "Pending Justification": "draft", "Justified": "paid", "Unjustified": "cancelled" };
+		return `<span class="ahr-badge ${cls[status] || "draft"}">${__(status || "")}</span>`;
+	}
+
+	view_occurrences() {
+		const STATUSES = ["", "Pending Justification", "Justified", "Unjustified"];
+		this.$content.html(
+			`<div class="ahr-filters">
+				<div class="ahr-field"><label>${__("Employee")}</label><div class="occ-f-emp"></div></div>
+				<div class="ahr-field"><label>${__("Status")}</label>
+					<select class="occ-f-status form-control">
+						${STATUSES.map((x) => `<option value="${x}">${x ? __(x) : __("All Statuses")}</option>`).join("")}
+					</select></div>
+				<div class="ahr-field"><label>${__("From")}</label><input type="date" class="occ-f-from"></div>
+				<div class="ahr-field"><label>${__("To")}</label><input type="date" class="occ-f-to"></div>
+				<button class="btn btn-primary btn-sm occ-new" style="align-self:flex-end;"><i class="fa fa-plus"></i> ${__("New Occurrence")}</button>
+			</div>
+			<div class="ahr-panel ahr-list"></div>`
+		);
+		const cols = [
+			{ key: "occurrence_date", label: "Date", date: true },
+			{ key: "employee_name", label: "Employee" },
+			{ key: "occurrence_type", label: "Type", render: (v) => __(v) },
+			{ key: "hours", label: "Hours", num: true },
+			{ key: "status", label: "Status", render: (v) => this.occStatus(v) },
+			{ key: "justification_reason", label: "Reason", render: (v) => (v ? frappe.utils.escape_html(v) : "—") },
+			{ key: "justification_deadline", label: "Deadline", date: true },
+		];
+		let empCtrl = null;
+		const load = () => {
+			this.call("list_occurrences", {
+				company: this.state.company,
+				employee: empCtrl ? empCtrl.get_value() || null : null,
+				status: this.$content.find(".occ-f-status").val() || null,
+				from_date: this.$content.find(".occ-f-from").val() || null,
+				to_date: this.$content.find(".occ-f-to").val() || null,
+			}).then((rows) => {
+				this.$content.find(".ahr-list").html(
+					`<div class="ahr-list-meta">${rows.length} ${__("occurrences")}</div>` +
+						this.table(cols, rows, { id: "name" })
+				);
+				this.$content.find(".ahr-list tr.clickable").on("click", (e) =>
+					this.openOccurrence(rows.find((r) => r.name === $(e.currentTarget).data("id")))
+				);
+			});
+		};
+		this._listReload = load;
+		empCtrl = frappe.ui.form.make_control({
+			df: { fieldtype: "Link", options: "Employee", placeholder: __("All Employees") },
+			parent: this.$content.find(".occ-f-emp")[0], render_input: true, only_input: true,
+		});
+		empCtrl.$input.on("change awesomplete-selectcomplete", () => load());
+		this.$content.find(".occ-f-status, .occ-f-from, .occ-f-to").on("change", load);
+		this.$content.find(".occ-new").on("click", () => this.newOccurrence());
+		load();
+	}
+
+	newOccurrence() {
+		const d = new frappe.ui.Dialog({
+			title: __("New Occurrence"),
+			fields: [
+				{ fieldname: "employee", label: __("Employee"), fieldtype: "Link", options: "Employee", reqd: 1 },
+				{ fieldname: "occurrence_date", label: __("Occurrence Date"), fieldtype: "Date", reqd: 1, default: frappe.datetime.get_today() },
+				{ fieldtype: "Column Break" },
+				{ fieldname: "occurrence_type", label: __("Type"), fieldtype: "Select", reqd: 1, default: "Full Day",
+				  options: ["Lateness", "Early Exit", "Partial Absence", "Half Day", "Full Day"].join("\n") },
+				{ fieldname: "hours", label: __("Missing Hours"), fieldtype: "Float",
+				  depends_on: "eval:['Lateness','Early Exit','Partial Absence'].includes(doc.occurrence_type)" },
+				{ fieldtype: "Section Break" },
+				{ fieldname: "remarks", label: __("Remarks"), fieldtype: "Small Text" },
+			],
+			primary_action_label: __("Create"),
+			primary_action: (v) => {
+				this.call("create_occurrence", { data: JSON.stringify(v) }).then(() => {
+					d.hide();
+					frappe.show_alert({ message: __("Occurrence registered"), indicator: "green" });
+					this.go("occurrences");
+				});
+			},
+		});
+		d.show();
+	}
+
+	openOccurrence(o) {
+		if (!o) return;
+		const esc = frappe.utils.escape_html;
+		const info = `<div class="ahr-form-grid">
+			<div><b>${__("Employee")}:</b> ${esc(o.employee_name || o.employee)}</div>
+			<div><b>${__("Occurrence Date")}:</b> ${this.d(o.occurrence_date)}</div>
+			<div><b>${__("Type")}:</b> ${__(o.occurrence_type)}</div>
+			<div><b>${__("Missing Hours")}:</b> ${flt(o.hours)}</div>
+			<div><b>${__("Status")}:</b> ${this.occStatus(o.status)}</div>
+			<div><b>${__("Justification Deadline")}:</b> ${this.d(o.justification_deadline)}</div>
+			<div><b>${__("Reason")}:</b> ${o.justification_reason ? esc(o.justification_reason) : "—"}</div>
+			<div><b>${__("Remarks")}:</b> ${o.remarks ? esc(o.remarks) : "—"}</div></div>`;
+		const d = new frappe.ui.Dialog({ title: o.name, size: "large" });
+		$(d.body).html(this.panel(__("Occurrence"), info) +
+			`<div class="ahr-doc-actions">
+				${o.status !== "Justified" ? `<button class="btn btn-xs btn-primary occ-justify">${__("Justify")}</button>` : ""}
+				${o.status !== "Unjustified" ? `<button class="btn btn-xs btn-default occ-unjust">${__("Mark Unjustified")}</button>` : ""}
+				${o.status !== "Pending Justification" ? `<button class="btn btn-xs btn-default occ-pending">${__("Reset to Pending")}</button>` : ""}
+				<button class="btn btn-xs btn-danger occ-delete">${__("Delete")}</button>
+			</div>`);
+		$(d.body).find(".occ-justify").on("click", () => { d.hide(); this.justifyOccurrence(o.name); });
+		$(d.body).find(".occ-unjust").on("click", () =>
+			this.call("set_occurrence_status", { name: o.name, status: "Unjustified" }).then(() => { d.hide(); this.go("occurrences"); }));
+		$(d.body).find(".occ-pending").on("click", () =>
+			this.call("set_occurrence_status", { name: o.name, status: "Pending Justification" }).then(() => { d.hide(); this.go("occurrences"); }));
+		$(d.body).find(".occ-delete").on("click", () =>
+			frappe.confirm(__("Delete this occurrence?"), () =>
+				this.call("delete_occurrence", { name: o.name }).then(() => { d.hide(); this.go("occurrences"); })));
+		d.show();
+	}
+
+	justifyOccurrence(name) {
+		const d = new frappe.ui.Dialog({
+			title: __("Justify Occurrence"),
+			fields: [
+				{ fieldname: "reason", label: __("Justification Reason"), fieldtype: "Link", options: "Isoft Absence Reason", reqd: 1,
+				  get_query: () => ({ filters: { is_active: 1 } }) },
+				{ fieldname: "document", label: __("Supporting Document"), fieldtype: "Attach" },
+				{ fieldname: "remarks", label: __("Remarks"), fieldtype: "Small Text" },
+			],
+			primary_action_label: __("Mark Justified"),
+			primary_action: (v) => {
+				this.call("justify_occurrence", { name, reason: v.reason, document: v.document || null, remarks: v.remarks || null })
+					.then(() => { d.hide(); frappe.show_alert({ message: __("Justified"), indicator: "green" }); this.go("occurrences"); });
+			},
+		});
+		d.show();
+	}
+
+	// ---- Absence Reasons (Settings) ----
+	view_reasons() {
+		this.$content.html(
+			`<div class="ahr-filters"><button class="btn btn-primary btn-sm rsn-new"><i class="fa fa-plus"></i> ${__("New Reason")}</button></div>
+			<div class="ahr-panel rsn-list"></div>`
+		);
+		const load = () => {
+			this.call("list_absence_reasons").then((rows) => {
+				this.$content.find(".rsn-list").html(
+					this.table(
+						[{ key: "reason", label: "Reason" },
+						 { key: "is_active", label: "Active", render: (v) => (v ? __("Yes") : __("No")) }],
+						rows, { id: "name" }
+					)
+				);
+				this.$content.find(".rsn-list tr.clickable").on("click", (e) =>
+					this.editReason(rows.find((r) => r.name === $(e.currentTarget).data("id"))));
+			});
+		};
+		this.$content.find(".rsn-new").on("click", () => this.editReason({}));
+		load();
+	}
+
+	editReason(r) {
+		r = r || {};
+		const d = new frappe.ui.Dialog({
+			title: r.name ? __("Edit Reason") : __("New Reason"),
+			fields: [
+				{ fieldname: "reason", label: __("Reason"), fieldtype: "Data", reqd: 1, default: r.reason },
+				{ fieldname: "is_active", label: __("Active"), fieldtype: "Check", default: r.name ? r.is_active : 1 },
+				...(r.name ? [{ fieldname: "del", label: __("Delete this reason"), fieldtype: "Check" }] : []),
+			],
+			primary_action_label: __("Save"),
+			primary_action: (v) => {
+				if (v.del) {
+					this.call("delete_absence_reason", { name: r.name }).then(() => { d.hide(); this.go("reasons"); });
+					return;
+				}
+				this.call("save_absence_reason", { reason: v.reason, is_active: v.is_active ? 1 : 0, old_name: r.name || null })
+					.then(() => { d.hide(); frappe.show_alert({ message: __("Saved"), indicator: "green" }); this.go("reasons"); });
+			},
+		});
+		d.show();
+	}
+
 	view_timesheets() {
 		this.renderFilterList(
 			"list_timesheets",
@@ -951,6 +1133,12 @@ class AngolaHR {
 			});
 		};
 
+		// Prefill the period from the configured payroll cycle (e.g. 23 → 22).
+		if (this.state.default_period) {
+			this.$content.find(".pe-start").val(this.state.default_period.start);
+			this.$content.find(".pe-end").val(this.state.default_period.end);
+		}
+
 		this._refreshHistory = list;
 		this.$content.find(".pe-company").val(this.state.company || "");
 		this.$content.find(".pe-company").on("change", (e) => {
@@ -999,6 +1187,7 @@ class AngolaHR {
 		const included = (r) => !this._excluded.has(r.employee);
 		const total = rows.filter(included).reduce((s, r) => s + flt(r.net_pay), 0);
 		const count = rows.filter(included).length;
+		const showNatal = rows.some((r) => flt(r.christmas) > 0 || flt(r.natal_default) > 0);
 
 		const body = rows
 			.map((r) => {
@@ -1010,6 +1199,8 @@ class AngolaHR {
 				<td>${esc(r.department || "")}</td>
 				<td class="num">${flt(r.payment_days)}/${flt(r.total_working_days)}</td>
 				<td class="num">${this.money(r.base)}</td>
+				<td class="num"><label class="pv-ferias-lbl"><input type="checkbox" class="pv-ferias" data-full="${flt(r.ferias_full)}" ${flt(r.vacation) > 0 ? "checked" : ""}> <span class="pv-ferias-amt">${flt(r.vacation) > 0 ? this.money(r.ferias_full) : "—"}</span></label></td>
+				${showNatal ? `<td><input type="number" class="form-control input-xs pv-natal" value="${flt(r.christmas)}"></td>` : ""}
 				<td><input type="number" class="form-control input-xs pv-f" data-k="overtime_amount" value="${flt(r.overtime_amount)}"></td>
 				<td><input type="number" class="form-control input-xs pv-f" data-k="productivity_bonus" value="${flt(r.productivity_bonus)}"></td>
 				<td><input type="number" class="form-control input-xs pv-f" data-k="adiantamento" value="${flt(r.adiantamento)}"></td>
@@ -1029,7 +1220,7 @@ class AngolaHR {
 					<div class="pv-scroll"><table class="ahr-table pv-table"><thead><tr>
 					<th class="pv-c"><input type="checkbox" class="pv-all" checked></th>
 					<th>${__("Employee")}</th><th>${__("Department")}</th><th class="num">${__("Days")}</th>
-					<th class="num">${__("Base")}</th><th>${__("Overtime")}</th><th>${__("Bonus")}</th><th>${__("Advance")}</th>
+					<th class="num">${__("Base")}</th><th class="num">${__("Vacation")}</th>${showNatal ? `<th class="num">${__("Christmas")}</th>` : ""}<th>${__("Overtime")}</th><th>${__("Bonus")}</th><th>${__("Advance")}</th>
 					<th class="num">${__("Taxable")}</th><th class="num">${__("SS")}</th><th class="num">${__("IRT")}</th>
 					<th class="num">${__("Gross")}</th><th class="num">${__("Net")}</th></tr></thead>
 					<tbody>${body}</tbody></table></div>
@@ -1070,6 +1261,12 @@ class AngolaHR {
 				$tr.toggle(!q || ($tr.attr("data-search") || "").indexOf(q) !== -1);
 			});
 		});
+		$w.find(".pv-ferias").on("change", (e) => {
+			const $cb = $(e.currentTarget);
+			$cb.closest(".pv-ferias-lbl").find(".pv-ferias-amt").text($cb.is(":checked") ? this.money(flt($cb.data("full"))) : "—");
+			this.runPreview(this.collectPreview().inputs);
+		});
+		$w.find(".pv-natal").on("change", () => this.runPreview(this.collectPreview().inputs));
 		$w.find(".pv-recalc").on("click", () => this.runPreview(this.collectPreview().inputs));
 		$w.find(".pv-create").on("click", () => {
 			const f = this.peFilters();
@@ -1105,7 +1302,13 @@ class AngolaHR {
 			const emp = $tr.data("emp");
 			const o = { employee: emp, employee_name: $tr.data("name") };
 			$tr.find(".pv-f").each((__, i) => (o[$(i).data("k")] = flt($(i).val())));
-			inputs[emp] = { overtime_amount: o.overtime_amount, productivity_bonus: o.productivity_bonus, adiantamento: o.adiantamento };
+			const $fer = $tr.find(".pv-ferias");
+			const ferias = $fer.length && $fer.is(":checked") ? flt($fer.data("full")) : 0;
+			const $nat = $tr.find(".pv-natal");
+			const natal = $nat.length ? flt($nat.val()) : 0;
+			o.subsidio_ferias = ferias;
+			o.subsidio_natal = natal;
+			inputs[emp] = { overtime_amount: o.overtime_amount, productivity_bonus: o.productivity_bonus, adiantamento: o.adiantamento, ferias_amount: ferias, natal_amount: natal };
 			if ($tr.find(".pv-include").is(":checked")) rows.push(o);
 		});
 		return { inputs, rows };
@@ -1297,11 +1500,13 @@ class AngolaHR {
 			const chk = (k, l) => `<label style="display:block;margin:6px 0;"><input type="checkbox" class="set-c" data-k="${k}" ${s[k] ? "checked" : ""}> ${__(l)}</label>`;
 			// Account fields render as Link controls (autocomplete on typing) — see mkLink below.
 			const acc = (k, l) => `<div class="ahr-field"><label>${__(l)}</label><div class="set-link" data-k="${k}"></div></div>`;
+			const sel = (k, l, opts) => `<div class="ahr-field"><label>${__(l)}</label><select class="set-sel" data-k="${k}">${opts.map((o) => `<option value="${o}" ${s[k] === o ? "selected" : ""}>${__(o)}</option>`).join("")}</select></div>`;
 			this.$content.html(
 				this.panel(
 					__("Company"),
 					`<div class="ahr-form-grid">
 						<div class="ahr-field"><label>${__("Default Holiday List")}</label><div class="set-link-hl"></div></div>
+						${num("payroll_cycle_start_day", "Payroll Cycle Start Day")}
 					</div>
 					<div class="text-muted small" style="margin-top:6px;">${__("Used for working-day calculation and the Upcoming Holidays panel. Applies to {0}.", [s._company || __("the default company")])}</div>`
 				) +
@@ -1312,8 +1517,19 @@ class AngolaHR {
 						${num("ss_employer_rate", "Social Security - Employer %")}
 						${num("food_allowance_exemption", "Food Allowance Exemption")}
 						${num("transport_allowance_exemption", "Transport Allowance Exemption")}
+							${num("overtime_multiplier", "Overtime Multiplier")}
+							${num("ferias_rate", "Subsídio de Férias (% of Base)")}
+							${num("natal_rate", "Subsídio de Natal (% of Base, December)")}
+							${sel("natal_payment_month", "Natal Payment Month", ["January","February","March","April","May","June","July","August","September","October","November","December"])}
 					</div>`
 				) +
+					this.panel(
+						__("Working Days"),
+						`<div class="ahr-form-grid">
+							${sel("working_days_basis", "Working Days Basis", ["Auto (Holiday List)", "Standard (Fixed)"])}
+							${num("standard_working_days", "Standard Working Days")}
+						</div>`
+					) +
 					this.panel(
 						__("Enabled Components"),
 						chk("enable_productivity_bonus", "Prémio de Produtividade") +
@@ -1379,6 +1595,7 @@ class AngolaHR {
 				const data = {};
 				this.$content.find(".set-f").each((_, i) => (data[$(i).data("k")] = flt($(i).val())));
 				this.$content.find(".set-c").each((_, i) => (data[$(i).data("k")] = $(i).is(":checked") ? 1 : 0));
+				this.$content.find(".set-sel").each((_, i) => (data[$(i).data("k")] = $(i).val()));
 				Object.keys(accCtrls).forEach((k) => (data[k] = accCtrls[k].get_value() || null));
 				data.component_accounts = Object.keys(caCtrls).map((abbr) => ({
 					abbr: abbr,

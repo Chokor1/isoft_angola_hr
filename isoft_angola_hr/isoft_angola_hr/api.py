@@ -12,7 +12,8 @@ import json
 import frappe
 from frappe import _
 from frappe.utils import (
-	add_months, cint, date_diff, flt, formatdate, get_first_day, get_last_day, getdate, nowdate,
+	add_days, add_months, cint, date_diff, flt, formatdate, get_first_day, get_last_day, getdate,
+	nowdate,
 )
 
 HR_ROLES = {"HR Manager"}
@@ -31,6 +32,33 @@ def _default_company(company=None):
 	return company or frappe.db.get_single_value("Isoft HR Settings", "default_company") or (
 		_companies()[0] if _companies() else None
 	)
+
+
+def _cycle_period(anchor=None, start_day=None):
+	"""Payroll period for the given anchor date, honouring the configured cycle start day.
+	start_day=1 -> calendar month; start_day=23 -> [23 prev month .. 22 current], etc.
+	Returns the period that contains the anchor date."""
+	anchor = getdate(anchor or nowdate())
+	if start_day is None:
+		start_day = cint(frappe.db.get_single_value("Isoft HR Settings", "payroll_cycle_start_day")) or 1
+	start_day = max(1, min(28, cint(start_day)))
+	if start_day <= 1:
+		return get_first_day(anchor), get_last_day(anchor)
+	start = anchor.replace(day=start_day) if anchor.day >= start_day \
+		else add_months(anchor.replace(day=start_day), -1)
+	end = add_days(add_months(getdate(start), 1), -1)
+	return getdate(start), getdate(end)
+
+
+def _default_cycle_period():
+	"""The period to default the payroll form to — the most recently CLOSED period, since
+	HR processes a period after it ends (day 22). Calendar months default to this month."""
+	start_day = cint(frappe.db.get_single_value("Isoft HR Settings", "payroll_cycle_start_day")) or 1
+	today = getdate(nowdate())
+	if start_day <= 1:
+		return get_first_day(today), get_last_day(today)
+	open_start, _ = _cycle_period(today, start_day)
+	return _cycle_period(add_days(open_start, -1), start_day)
 
 
 def _slip_status(docstatus, journal_entry=None, payment_entry=None):
@@ -126,10 +154,12 @@ def get_overview(company=None):
 		limit=8,
 	)
 
+	cyc_start, cyc_end = _default_cycle_period()
 	return {
 		"companies": _companies(),
 		"company": company,
 		"period": {"start": str(start), "end": str(end)},
+		"default_period": {"start": str(cyc_start), "end": str(cyc_end)},
 		"cards": {
 			"active_employees": frappe.db.count("Employee", emp_filters),
 			"salary_profiles": frappe.db.count("Isoft Salary Profile",
@@ -266,6 +296,122 @@ def mark_attendance(employee, attendance_date, status, working_hours=0, overtime
 	return doc.name
 
 
+# --------------------------------------------------------------------------- #
+# Attendance Occurrences (lateness / early exit / partial / half / full) + justification
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def list_occurrences(company=None, employee=None, status=None, from_date=None, to_date=None):
+	_guard()
+	conds = ["1=1"]
+	vals = []
+	if company:
+		conds.append("company=%s"); vals.append(company)
+	if employee:
+		conds.append("employee=%s"); vals.append(employee)
+	if status:
+		conds.append("status=%s"); vals.append(status)
+	if from_date:
+		conds.append("occurrence_date>=%s"); vals.append(getdate(from_date))
+	if to_date:
+		conds.append("occurrence_date<=%s"); vals.append(getdate(to_date))
+	return frappe.db.sql(
+		"""select name, employee, employee_name, occurrence_date, occurrence_type, hours,
+		status, justification_reason, justification_deadline, justification_date, remarks
+		from `tabIsoft Attendance Occurrence` where {} order by occurrence_date desc, modified desc
+		limit 500""".format(" and ".join(conds)),
+		vals, as_dict=True,
+	)
+
+
+@frappe.whitelist()
+def create_occurrence(data):
+	_guard()
+	d = json.loads(data) if isinstance(data, str) else data
+	doc = frappe.new_doc("Isoft Attendance Occurrence")
+	doc.update({
+		"employee": d.get("employee"),
+		"occurrence_date": d.get("occurrence_date"),
+		"occurrence_type": d.get("occurrence_type"),
+		"hours": flt(d.get("hours")),
+		"remarks": d.get("remarks"),
+		"status": "Pending Justification",
+	})
+	doc.insert()
+	frappe.db.commit()
+	return doc.name
+
+
+@frappe.whitelist()
+def justify_occurrence(name, reason, document=None, remarks=None):
+	"""Mark an occurrence as Justified with a reason (and optional supporting document)."""
+	_guard()
+	doc = frappe.get_doc("Isoft Attendance Occurrence", name)
+	doc.status = "Justified"
+	doc.justification_reason = reason
+	if document:
+		doc.justification_document = document
+	if remarks:
+		doc.remarks = remarks
+	doc.save()
+	frappe.db.commit()
+	return True
+
+
+@frappe.whitelist()
+def set_occurrence_status(name, status):
+	"""Manually set the status (e.g. back to Pending, or straight to Unjustified)."""
+	_guard()
+	doc = frappe.get_doc("Isoft Attendance Occurrence", name)
+	doc.status = status
+	if status != "Justified":
+		doc.justification_reason = None
+	doc.save()
+	frappe.db.commit()
+	return True
+
+
+@frappe.whitelist()
+def delete_occurrence(name):
+	_guard()
+	frappe.delete_doc("Isoft Attendance Occurrence", name, force=1)
+	frappe.db.commit()
+	return True
+
+
+@frappe.whitelist()
+def list_absence_reasons(active_only=0):
+	_guard()
+	filters = {"is_active": 1} if cint(active_only) else {}
+	return frappe.get_all("Isoft Absence Reason", filters=filters,
+	                      fields=["name", "reason", "is_active"], order_by="reason")
+
+
+@frappe.whitelist()
+def save_absence_reason(reason, is_active=1, old_name=None):
+	_guard()
+	if old_name and frappe.db.exists("Isoft Absence Reason", old_name):
+		doc = frappe.get_doc("Isoft Absence Reason", old_name)
+		doc.is_active = cint(is_active)
+		if old_name != reason:
+			frappe.rename_doc("Isoft Absence Reason", old_name, reason, force=True)
+		doc = frappe.get_doc("Isoft Absence Reason", reason)
+		doc.is_active = cint(is_active)
+		doc.save()
+	elif not frappe.db.exists("Isoft Absence Reason", reason):
+		frappe.get_doc({"doctype": "Isoft Absence Reason", "reason": reason,
+		                "is_active": cint(is_active)}).insert()
+	frappe.db.commit()
+	return reason
+
+
+@frappe.whitelist()
+def delete_absence_reason(name):
+	_guard()
+	frappe.delete_doc("Isoft Absence Reason", name, force=1)
+	frappe.db.commit()
+	return True
+
+
 @frappe.whitelist()
 def list_timesheets(company=None, employee=None):
 	_guard()
@@ -361,19 +507,6 @@ def create_payroll_entry(company, start_date, end_date, posting_date=None, depar
 	return {"name": entry.name, "employees": count, "total_net_pay": flt(entry.total_net_pay)}
 
 
-def _working_days(employee, start, end):
-	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import get_holiday_count
-
-	total = (getdate(end) - getdate(start)).days + 1
-	twd = max(0, total - get_holiday_count(employee, start, end))
-	absent = frappe.db.sql(
-		"""select count(*) from `tabAttendance` where employee=%s and docstatus=1
-		and status='Absent' and attendance_date between %s and %s""",
-		(employee, getdate(start), getdate(end)),
-	)[0][0]
-	return twd, max(0, twd - absent)
-
-
 @frappe.whitelist()
 def payroll_preview(company, start_date, end_date, department=None, branch=None,
                     designation=None, inputs=None, validate_attendance=0, based_on_timesheet=0):
@@ -381,7 +514,9 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 	any per-employee variable inputs (overtime / bonus / advance) passed back from the UI."""
 	_guard()
 	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import get_active_profile
-	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import compute_working_days
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
+		attendance_overtime_amount, compute_working_days,
+	)
 	from isoft_angola_hr.isoft_angola_hr.payroll import engine
 
 	inputs = (json.loads(inputs) if isinstance(inputs, str) else inputs) or {}
@@ -393,7 +528,7 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		if v:
 			filters[f] = v
 	emps = frappe.get_all("Employee", filters=filters,
-	                      fields=["name", "employee_name", "department", "designation"],
+	                      fields=["name", "employee_name", "department", "designation", "date_of_joining"],
 	                      order_by="employee_name", limit_page_length=2000)
 	settings = engine.get_settings()
 	out = []
@@ -406,11 +541,29 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		twd, pay_days = compute_working_days(e.name, start, end,
 		                                     validate_attendance=validate_attendance,
 		                                     based_on_timesheet=based_on_timesheet)
-		inp = inputs.get(e.name, {})
+		# Defaults: Férias is paid only when HR ticks the employee (default 0); the tick
+		# fills the full amount (ferias_full). Natal defaults to the December-prorated
+		# amount and is editable per employee.
+		ferias_full = engine.ferias_full(prof.base, settings.ferias_rate)
+		natal_default = engine.default_natal(prof.base, settings.natal_rate, e.date_of_joining, end,
+		                                     settings.get("natal_payment_month"))
+		# Overtime defaults to the amount computed from logged Attendance overtime hours
+		# (when validating attendance); HR can override it in the preview.
+		ot_default = (attendance_overtime_amount(e.name, prof.base, twd, start, end, settings.overtime_multiplier)
+		              if cint(validate_attendance) else 0.0)
+		inp = inputs.get(e.name)
+		if inp is None:
+			ferias_amt, natal_amt = 0.0, natal_default
+			overtime_amt = ot_default
+		else:
+			ferias_amt = flt(inp.get("ferias_amount"))
+			natal_amt = flt(inp.get("natal_amount"))
+			overtime_amt = flt(inp.get("overtime_amount"))
 		res = engine.compute_slip(prof, {
-			"productivity_bonus": flt(inp.get("productivity_bonus")),
-			"overtime_amount": flt(inp.get("overtime_amount")),
-			"adiantamento": flt(inp.get("adiantamento")),
+			"productivity_bonus": flt((inp or {}).get("productivity_bonus")),
+			"overtime_amount": overtime_amt,
+			"adiantamento": flt((inp or {}).get("adiantamento")),
+			"ferias_amount": ferias_amt, "natal_amount": natal_amt,
 			"payment_days": pay_days, "total_working_days": twd,
 		}, settings=settings, on_date=end)
 		ded = {d["abbr"]: d["amount"] for d in res["deductions"]}
@@ -418,9 +571,11 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 			"employee": e.name, "employee_name": e.employee_name,
 			"department": e.department, "designation": e.designation,
 			"base": flt(prof.base), "total_working_days": twd, "payment_days": pay_days,
-			"productivity_bonus": flt(inp.get("productivity_bonus")),
-			"overtime_amount": flt(inp.get("overtime_amount")),
-			"adiantamento": flt(inp.get("adiantamento")),
+			"productivity_bonus": flt((inp or {}).get("productivity_bonus")),
+			"overtime_amount": flt(overtime_amt),
+			"adiantamento": flt((inp or {}).get("adiantamento")),
+			"vacation": flt(ferias_amt), "ferias_full": flt(ferias_full),
+			"christmas": flt(natal_amt), "natal_default": flt(natal_default),
 			"taxable_income": res["taxable_income"], "ss": flt(ded.get("CTSS3")),
 			"irt": flt(ded.get("IRT")), "gross_pay": res["gross_pay"],
 			"total_deduction": res["total_deduction"], "net_pay": res["net_pay"],
@@ -452,6 +607,8 @@ def create_payroll_from_preview(company, start_date, end_date, rows, posting_dat
 			"productivity_bonus": flt(r.get("productivity_bonus")),
 			"overtime_amount": flt(r.get("overtime_amount")),
 			"adiantamento": flt(r.get("adiantamento")),
+			"subsidio_ferias": flt(r.get("subsidio_ferias")),
+			"subsidio_natal": flt(r.get("subsidio_natal")),
 		})
 	entry.number_of_employees = len(entry.employees)
 	entry.insert()
@@ -833,8 +990,11 @@ def get_settings(company=None):
 
 	s = frappe.get_single("Isoft HR Settings")
 	out = {f: s.get(f) for f in [
-		"default_company", "default_irt_table", "currency", "ss_employee_rate", "ss_employer_rate",
+		"default_company", "default_irt_table", "currency", "payroll_cycle_start_day",
+		"ss_employee_rate", "ss_employer_rate",
 		"food_allowance_exemption", "transport_allowance_exemption", "standard_daily_hours",
+		"overtime_multiplier", "working_days_basis", "standard_working_days", "ferias_rate", "natal_rate",
+		"natal_payment_month",
 		"enable_productivity_bonus", "enable_overtime", "enable_adiantamento", "enable_family_allowance",
 		"payroll_payable_account", "salary_payment_account"]}
 	# Default Holiday List lives on the Company; expose it for the current company.

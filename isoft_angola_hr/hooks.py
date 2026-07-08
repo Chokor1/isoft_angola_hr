@@ -129,6 +129,13 @@ app_include_js = "/assets/isoft_angola_hr/js/angola_hr_icon.js"
 #	]
 # }
 
+scheduler_events = {
+	"daily": [
+		"isoft_angola_hr.isoft_angola_hr.doctype.isoft_attendance_occurrence.isoft_attendance_occurrence.auto_flag_unjustified",
+		"isoft_angola_hr.isoft_angola_hr.doctype.isoft_attendance_occurrence.isoft_attendance_occurrence.check_recurrence_alerts",
+	],
+}
+
 # Testing
 # -------
 

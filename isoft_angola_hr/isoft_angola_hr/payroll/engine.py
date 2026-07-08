@@ -17,7 +17,7 @@ Component model (abbr -> definition):
 """
 
 import frappe
-from frappe.utils import flt
+from frappe.utils import cint, flt, getdate
 
 from isoft_angola_hr.isoft_angola_hr.doctype.irt_table.irt_table import compute_irt
 
@@ -28,6 +28,10 @@ COMPONENTS = {
 	"SDA": {"name": "Subsídio de Alimentação", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": True},
 	"SDT": {"name": "Subsídio de Transporte", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": True},
 	"AF": {"name": "Abono de Família", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": True},
+	# Duodécimos — Angola holiday (férias) and Christmas (Natal) subsidies, accrued
+	# monthly as a % of base. Optional, fully taxable and fully in the SS base.
+	"SFE": {"name": "Subsídio de Férias", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
+	"SNA": {"name": "Subsídio de Natal", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"PPD": {"name": "Prémio de Produtividade", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"HEX": {"name": "Horas Extras", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"TI": {"name": "Rendimento Tributável", "kind": "earning", "in_gross": False, "ss_base": False, "prorate": False},
@@ -49,6 +53,37 @@ def journal_components():
 
 def get_settings():
 	return frappe.get_cached_doc("Isoft HR Settings")
+
+
+def ferias_full(base, ferias_rate):
+	"""Full Vacation Allowance = base * ferias_rate% (what an employee gets the month
+	they take their annual leave)."""
+	return flt(flt(base) * (flt(ferias_rate) or 0.0) / 100.0, 2)
+
+
+MONTHS = ["January", "February", "March", "April", "May", "June",
+          "July", "August", "September", "October", "November", "December"]
+
+
+def default_natal(base, natal_rate, joining_date, period_end, payment_month=None):
+	"""Default 13th-month (Natal) allowance: base * natal_rate%, prorated by the months
+	worked in the period's year (full year -> full; joined mid-year -> months since joining
+	/ 12). Paid only in the payroll period that ENDS in the configured payment month
+	(default December). Zero otherwise. HR can override the returned value per employee."""
+	end = getdate(period_end) if period_end else None
+	pm = payment_month if payment_month in MONTHS else "December"
+	month_idx = MONTHS.index(pm) + 1
+	if not end or end.month != month_idx:
+		return 0.0
+	full = flt(base) * (flt(natal_rate) or 0.0) / 100.0
+	months = 12
+	if joining_date:
+		jd = getdate(joining_date)
+		if jd.year == end.year:
+			months = max(0, min(12, 12 - jd.month + 1))
+		elif jd.year > end.year:
+			months = 0
+	return flt(full * months / 12.0, 2)
 
 
 def compute_slip(profile, inputs, settings=None, on_date=None):
@@ -83,16 +118,24 @@ def compute_slip(profile, inputs, settings=None, on_date=None):
 	ppd = flt(inputs.get("productivity_bonus"))
 	hex_ = flt(inputs.get("overtime_amount"))
 
+	# Vacation (VA / Subsídio de Férias) and Christmas (CA / Subsídio de Natal) are
+	# per-employee amounts decided in the payroll run (see api.payroll_preview for the
+	# defaults: Férias is paid the month the employee takes leave; Natal in December,
+	# prorated by months worked). The engine just consumes the amounts.
+	sfe = flt(inputs.get("ferias_amount"))
+	sna = flt(inputs.get("natal_amount"))
+
 	# Taxable portions of allowances (exempt up to the configured threshold)
 	taxable_food = max(0.0, sda - food_exempt)
 	taxable_transport = max(0.0, sdt - transport_exempt)
 
-	# Segurança Social base and contribution
-	ss_base = sb + af + sda + sdt + ppd + hex_
+	# Segurança Social (INSS) base = 3% × (B − VA): the Vacation Allowance (SFE) is
+	# excluded from the SS base; the Christmas Allowance (SNA) is included.
+	ss_base = sb + af + sda + sdt + ppd + hex_ + sna
 	ctss3 = flt(ss_base * ss_rate / 100.0, 2)
 
-	# Rendimento Tributável (taxable income) — SS is deducted before IRT
-	taxable_income = flt(sb + taxable_food + taxable_transport + ppd + hex_ - ctss3, 2)
+	# Rendimento Tributável (MC) — includes both VA and CA fully; SS is deducted before IRT.
+	taxable_income = flt(sb + taxable_food + taxable_transport + ppd + hex_ + sfe + sna - ctss3, 2)
 
 	# IRT from the Angola IRT Table (monthly-direct)
 	irt_table = profile.get("irt_table") if hasattr(profile, "get") else getattr(profile, "irt_table", None)
@@ -112,6 +155,8 @@ def compute_slip(profile, inputs, settings=None, on_date=None):
 	add_e("SDA", sda)
 	add_e("SDT", sdt)
 	add_e("AF", af)
+	add_e("SFE", sfe)
+	add_e("SNA", sna)
 	add_e("PPD", ppd)
 	add_e("HEX", hex_)
 	add_e("TI", taxable_income)  # statistical, excluded from gross
