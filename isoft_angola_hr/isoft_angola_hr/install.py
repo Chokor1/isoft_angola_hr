@@ -505,7 +505,25 @@ def create_payslip_print_format():
 		doc.html = PAYSLIP_HTML
 		doc.print_format_type = "Jinja"
 		doc.custom_format = 1
-		doc.save(ignore_permissions=True)
+		# a copy created while developer_mode was on is flagged standard="Yes",
+		# which Print Format.validate() refuses to update outside developer_mode
+		doc.standard = "No"
+		doc.flags.ignore_validate_update_after_submit = True
+		try:
+			doc.save(ignore_permissions=True)
+		except frappe.ValidationError:
+			frappe.db.set_value(
+				"Print Format",
+				PAYSLIP_FORMAT,
+				{
+					"standard": "No",
+					"custom_format": 1,
+					"print_format_type": "Jinja",
+					"html": PAYSLIP_HTML,
+				},
+				update_modified=False,
+			)
+			frappe.clear_cache(doctype="Isoft Salary Slip")
 	else:
 		frappe.get_doc({
 			"doctype": "Print Format",
