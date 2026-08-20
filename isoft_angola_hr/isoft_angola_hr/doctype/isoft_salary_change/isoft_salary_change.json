@@ -1,0 +1,309 @@
+{
+ "actions": [],
+ "autoname": "format:SCH-{#####}",
+ "creation": "2026-08-10 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "company",
+  "column_break_3",
+  "change_type",
+  "effective_date",
+  "status",
+  "amounts_section",
+  "current_profile",
+  "current_base",
+  "current_food_allowance",
+  "current_transport_allowance",
+  "current_family_allowance",
+  "column_break_12",
+  "new_base",
+  "new_food_allowance",
+  "new_transport_allowance",
+  "new_family_allowance",
+  "percentage_change",
+  "position_section",
+  "new_designation",
+  "new_department",
+  "reason_section",
+  "reason",
+  "request_source",
+  "result_section",
+  "created_profile",
+  "closed_profile",
+  "audit_section",
+  "requested_by",
+  "requested_at",
+  "column_break_26",
+  "approved_by",
+  "approved_at",
+  "rejection_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Company",
+   "options": "Company",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "change_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Change Type",
+   "options": "Merit Increase\nPromotion\nAdjustment\nCorrection\nDemotion",
+   "reqd": 1
+  },
+  {
+   "fieldname": "effective_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective Date",
+   "reqd": 1
+  },
+  {
+   "default": "Draft",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nPending Approval\nApproved\nApplied\nRejected\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "amounts_section",
+   "fieldtype": "Section Break",
+   "label": "Remuneration"
+  },
+  {
+   "fieldname": "current_profile",
+   "fieldtype": "Link",
+   "label": "Current Salary Profile",
+   "options": "Isoft Salary Profile",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_base",
+   "fieldtype": "Currency",
+   "label": "Current Base",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_food_allowance",
+   "fieldtype": "Currency",
+   "label": "Current Food Allowance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_transport_allowance",
+   "fieldtype": "Currency",
+   "label": "Current Transport Allowance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "current_family_allowance",
+   "fieldtype": "Currency",
+   "label": "Current Family Allowance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_12",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "new_base",
+   "fieldtype": "Currency",
+   "label": "New Base",
+   "reqd": 1
+  },
+  {
+   "fieldname": "new_food_allowance",
+   "fieldtype": "Currency",
+   "label": "New Food Allowance"
+  },
+  {
+   "fieldname": "new_transport_allowance",
+   "fieldtype": "Currency",
+   "label": "New Transport Allowance"
+  },
+  {
+   "fieldname": "new_family_allowance",
+   "fieldtype": "Currency",
+   "label": "New Family Allowance"
+  },
+  {
+   "fieldname": "percentage_change",
+   "fieldtype": "Percent",
+   "label": "Change (%)",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Position Change"
+  },
+  {
+   "fieldname": "new_designation",
+   "fieldtype": "Link",
+   "label": "New Designation",
+   "options": "Designation"
+  },
+  {
+   "fieldname": "new_department",
+   "fieldtype": "Link",
+   "label": "New Department",
+   "options": "Department"
+  },
+  {
+   "fieldname": "reason_section",
+   "fieldtype": "Section Break",
+   "label": "Justification"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason",
+   "reqd": 1
+  },
+  {
+   "default": "HR initiated",
+   "description": "How this change was asked for. The person who keyed it is recorded separately as Requested By.",
+   "fieldname": "request_source",
+   "fieldtype": "Select",
+   "label": "Request Source",
+   "options": "\nEmployee verbal request\nEmail\nWritten request\nManagement instruction\nHR initiated\nOther"
+  },
+  {
+   "collapsible": 1,
+   "depends_on": "eval:doc.created_profile",
+   "fieldname": "result_section",
+   "fieldtype": "Section Break",
+   "label": "Result"
+  },
+  {
+   "fieldname": "created_profile",
+   "fieldtype": "Link",
+   "label": "Salary Profile Created",
+   "options": "Isoft Salary Profile",
+   "read_only": 1
+  },
+  {
+   "fieldname": "closed_profile",
+   "fieldtype": "Link",
+   "label": "Previous Profile Closed",
+   "options": "Isoft Salary Profile",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Audit"
+  },
+  {
+   "fieldname": "requested_by",
+   "fieldtype": "Link",
+   "label": "Requested By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "requested_at",
+   "fieldtype": "Datetime",
+   "label": "Requested At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_26",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Salary Change",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Payroll Officer",
+   "write": 1
+  },
+  {
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Payroll Manager"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

@@ -1,0 +1,473 @@
+{
+ "actions": [],
+ "creation": "2026-08-10 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "company",
+  "column_break_3",
+  "contract_type",
+  "contract_number",
+  "status",
+  "period_section",
+  "start_date",
+  "is_open_ended",
+  "end_date",
+  "column_break_9",
+  "notice_days",
+  "renewal_allowed",
+  "probation_section",
+  "probation_start",
+  "probation_end",
+  "probation_status",
+  "column_break_14",
+  "probation_decision",
+  "probation_decision_date",
+  "probation_decision_by",
+  "probation_notes",
+  "manager_input_section",
+  "manager_recommendation",
+  "manager_recommendation_date",
+  "manager_recommendation_by",
+  "column_break_mgr",
+  "renewal_recommendation",
+  "manager_recommendation_notes",
+  "position_section",
+  "department",
+  "designation",
+  "employment_type",
+  "column_break_20",
+  "work_location",
+  "holiday_list",
+  "shift_type",
+  "salary_section",
+  "salary_profile",
+  "history_section",
+  "previous_contract",
+  "renewed_to",
+  "column_break_28",
+  "terminated_on",
+  "termination_reason",
+  "document_section",
+  "contract_document",
+  "notes",
+  "audit_section",
+  "prepared_by",
+  "prepared_at",
+  "submitted_by",
+  "submitted_at",
+  "column_break_36",
+  "approved_by",
+  "approved_at",
+  "rejection_reason"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "label": "Employee Name",
+   "fetch_from": "employee.employee_name",
+   "read_only": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company",
+   "fetch_from": "employee.company",
+   "read_only": 1,
+   "in_standard_filter": 1
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "contract_type",
+   "fieldtype": "Link",
+   "label": "Contract Type",
+   "options": "Isoft Contract Type",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "contract_number",
+   "fieldtype": "Data",
+   "label": "Contract Number"
+  },
+  {
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "label": "Status",
+   "read_only": 1,
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "default": "Draft",
+   "options": "Draft\nPending Approval\nActive\nExpiring\nExpired\nRenewed\nTerminated\nRejected\nCancelled"
+  },
+  {
+   "fieldname": "period_section",
+   "fieldtype": "Section Break",
+   "label": "Period"
+  },
+  {
+   "fieldname": "start_date",
+   "fieldtype": "Date",
+   "label": "Start Date",
+   "reqd": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "is_open_ended",
+   "fieldtype": "Check",
+   "label": "Open Ended",
+   "default": "0"
+  },
+  {
+   "fieldname": "end_date",
+   "fieldtype": "Date",
+   "label": "End Date",
+   "depends_on": "eval:!doc.is_open_ended"
+  },
+  {
+   "fieldname": "column_break_9",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "notice_days",
+   "fieldtype": "Int",
+   "label": "Notice Period (days)"
+  },
+  {
+   "fieldname": "renewal_allowed",
+   "fieldtype": "Check",
+   "label": "Renewal Allowed",
+   "default": "1"
+  },
+  {
+   "fieldname": "probation_section",
+   "fieldtype": "Section Break",
+   "label": "Probation (Período Experimental)"
+  },
+  {
+   "fieldname": "probation_start",
+   "fieldtype": "Date",
+   "label": "Probation Start"
+  },
+  {
+   "fieldname": "probation_end",
+   "fieldtype": "Date",
+   "label": "Probation End"
+  },
+  {
+   "fieldname": "probation_status",
+   "fieldtype": "Select",
+   "label": "Probation Status",
+   "read_only": 1,
+   "default": "Not Applicable",
+   "options": "Not Applicable\nIn Progress\nReview Due\nOverdue\nConfirmed\nExtended\nFailed"
+  },
+  {
+   "fieldname": "column_break_14",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "probation_decision",
+   "fieldtype": "Select",
+   "label": "Decision",
+   "options": "\nConfirmed\nExtended\nTerminated"
+  },
+  {
+   "fieldname": "probation_decision_date",
+   "fieldtype": "Date",
+   "label": "Decision Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "probation_decision_by",
+   "fieldtype": "Link",
+   "label": "Decided By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "probation_notes",
+   "fieldtype": "Small Text",
+   "label": "Probation Notes"
+  },
+  {
+   "fieldname": "manager_input_section",
+   "fieldtype": "Section Break",
+   "label": "Line Manager Input"
+  },
+  {
+   "description": "The line manager's view. HR remains the decision-maker.",
+   "fieldname": "manager_recommendation",
+   "fieldtype": "Select",
+   "label": "Probation Recommendation",
+   "options": "\nConfirm\nExtend\nTerminate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "manager_recommendation_date",
+   "fieldtype": "Date",
+   "label": "Recommended On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "manager_recommendation_by",
+   "fieldtype": "Link",
+   "label": "Recommended By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_mgr",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "renewal_recommendation",
+   "fieldtype": "Select",
+   "label": "Renewal Recommendation",
+   "options": "\nRenew\nDo Not Renew",
+   "read_only": 1
+  },
+  {
+   "fieldname": "manager_recommendation_notes",
+   "fieldtype": "Small Text",
+   "label": "Manager Comments",
+   "read_only": 1
+  },
+  {
+   "fieldname": "position_section",
+   "fieldtype": "Section Break",
+   "label": "Position"
+  },
+  {
+   "fieldname": "department",
+   "fieldtype": "Link",
+   "label": "Department",
+   "options": "Department"
+  },
+  {
+   "fieldname": "designation",
+   "fieldtype": "Link",
+   "label": "Designation",
+   "options": "Designation"
+  },
+  {
+   "fieldname": "employment_type",
+   "fieldtype": "Link",
+   "label": "Employment Type",
+   "options": "Employment Type"
+  },
+  {
+   "fieldname": "column_break_20",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "work_location",
+   "fieldtype": "Data",
+   "label": "Work Location"
+  },
+  {
+   "fieldname": "holiday_list",
+   "fieldtype": "Link",
+   "label": "Holiday List",
+   "options": "Holiday List"
+  },
+  {
+   "fieldname": "shift_type",
+   "fieldtype": "Link",
+   "label": "Working Schedule",
+   "options": "Shift Type"
+  },
+  {
+   "fieldname": "salary_section",
+   "fieldtype": "Section Break",
+   "label": "Salary"
+  },
+  {
+   "fieldname": "salary_profile",
+   "fieldtype": "Link",
+   "label": "Salary Profile",
+   "options": "Isoft Salary Profile",
+   "read_only": 1,
+   "description": "Reference only. The Salary Profile remains the authoritative source of pay; the contract deliberately does not duplicate the amounts."
+  },
+  {
+   "fieldname": "history_section",
+   "fieldtype": "Section Break",
+   "label": "History",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "previous_contract",
+   "fieldtype": "Link",
+   "label": "Previous Contract",
+   "options": "Isoft Employment Contract",
+   "read_only": 1
+  },
+  {
+   "fieldname": "renewed_to",
+   "fieldtype": "Link",
+   "label": "Renewed To",
+   "options": "Isoft Employment Contract",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_28",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "terminated_on",
+   "fieldtype": "Date",
+   "label": "Terminated On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "termination_reason",
+   "fieldtype": "Small Text",
+   "label": "Termination Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "document_section",
+   "fieldtype": "Section Break",
+   "label": "Document"
+  },
+  {
+   "fieldname": "contract_document",
+   "fieldtype": "Attach",
+   "label": "Signed Contract"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Audit",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "prepared_by",
+   "fieldtype": "Link",
+   "label": "Prepared By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "prepared_at",
+   "fieldtype": "Datetime",
+   "label": "Prepared At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_by",
+   "fieldtype": "Link",
+   "label": "Submitted By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_36",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Employment Contract",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "Employee",
+   "read": 1,
+   "print": 1
+  },
+  {
+   "role": "HR Manager",
+   "create": 1,
+   "write": 1,
+   "delete": 1,
+   "share": 1,
+   "email": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "HR User",
+   "create": 1,
+   "write": 1,
+   "share": 1,
+   "email": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "format:ECT-{#####}"
+}

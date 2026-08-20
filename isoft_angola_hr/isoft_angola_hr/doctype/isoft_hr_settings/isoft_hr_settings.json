@@ -24,6 +24,26 @@
   "ferias_rate",
   "natal_rate",
   "natal_payment_month",
+  "settlement_section",
+  "settlement_salary_days",
+  "settlement_leave_days",
+  "settlement_weekly_hours",
+  "settlement_working_days_per_week",
+  "settlement_leave_includes_allowances",
+  "settlement_compensation_tax_position",
+  "controls_section",
+  "require_separate_payroll_approval",
+  "require_separate_payment_approval",
+  "column_break_controls",
+  "variance_threshold_percent",
+  "hr_controls_section",
+  "require_separate_contract_approval",
+  "require_separate_salary_change_approval",
+  "require_separate_advance_approval",
+  "column_break_hr_controls",
+  "contract_expiry_thresholds",
+  "document_expiry_thresholds",
+  "probation_review_window_days",
   "components_section",
   "enable_productivity_bonus",
   "enable_overtime",
@@ -36,7 +56,8 @@
   "payroll_payable_account",
   "salary_payment_account",
   "component_accounts_section",
-  "component_accounts"
+  "component_accounts",
+  "payroll_preview_columns"
  ],
  "fields": [
   {
@@ -153,6 +174,54 @@
    "description": "The payroll period that ends in this month includes the Subsídio de Natal (default December)."
   },
   {
+   "fieldname": "settlement_section",
+   "fieldtype": "Section Break",
+   "label": "Final Settlement (Termination)"
+  },
+  {
+   "default": "26",
+   "fieldname": "settlement_salary_days",
+   "fieldtype": "Int",
+   "label": "Settlement Salary Days (Divisor)",
+   "description": "Monthly working-day divisor for the proportional salary daily rate (base + allowances ÷ this). Default 26."
+  },
+  {
+   "default": "22",
+   "fieldname": "settlement_leave_days",
+   "fieldtype": "Int",
+   "label": "Settlement Leave Days (Divisor)",
+   "description": "Monthly divisor for the untaken-annual-leave daily rate (base ÷ this). Default 22."
+  },
+  {
+   "fieldname": "settlement_weekly_hours",
+   "fieldtype": "Float",
+   "label": "Normal Weekly Hours (Hs)",
+   "description": "Artigo 237.º n.º 7: S/H = (Sm × 12) / (52 × Hs). Needed only when a settlement uses the statutory hourly basis.",
+   "precision": "2"
+  },
+  {
+   "fieldname": "settlement_working_days_per_week",
+   "fieldtype": "Float",
+   "label": "Working Days per Week",
+   "default": "5",
+   "precision": "2"
+  },
+  {
+   "fieldname": "settlement_leave_includes_allowances",
+   "fieldtype": "Check",
+   "label": "Include Meal and Transport in Leave Pay",
+   "default": "0",
+   "description": "Artigo 213.º n.º 2 excludes them from leave remuneration unless the parties agreed otherwise. Tick only where a contract or collective agreement says so."
+  },
+  {
+   "fieldname": "settlement_compensation_tax_position",
+   "fieldtype": "Select",
+   "label": "Compensation Tax Position",
+   "default": "verification_required",
+   "description": "IRT incidence on termination compensation is not settled between the consolidated Código do IRT and the commentary on Lei n.º 28/20. This is a COMPANY TAX POSITION, not a statutory rate.",
+   "options": "verification_required\nexempt_within_lgt_limits\ntaxable"
+  },
+  {
    "fieldname": "components_section",
    "fieldtype": "Section Break",
    "label": "Enabled Components"
@@ -226,6 +295,92 @@
    "fieldtype": "Table",
    "label": "Component Accounts",
    "options": "Isoft Component Account"
+  },
+  {
+   "fieldname": "payroll_preview_columns",
+   "fieldtype": "Long Text",
+   "label": "Payroll Preview Columns (JSON)",
+   "hidden": 1,
+   "description": "Managed from the dashboard — order/visibility of the payroll preview columns."
+  },
+  {
+   "fieldname": "controls_section",
+   "fieldtype": "Section Break",
+   "label": "Payroll Controls"
+  },
+  {
+   "fieldname": "require_separate_payroll_approval",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Require Separate Payroll Approval",
+   "description": "The user who submits a payroll for approval may not approve it. Disable only if a company is too small to separate the duties — the risk is that one person can prepare and approve payroll alone."
+  },
+  {
+   "fieldname": "require_separate_payment_approval",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Require Separate Payment Approval",
+   "description": "The user who approved a payroll may not authorise its payment."
+  },
+  {
+   "fieldname": "column_break_controls",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "variance_threshold_percent",
+   "fieldtype": "Percent",
+   "default": "25",
+   "label": "Payroll Variance Threshold (%)",
+   "description": "Gross or net pay changing by more than this versus the previous period raises a readiness warning."
+  },
+  {
+   "fieldname": "hr_controls_section",
+   "fieldtype": "Section Break",
+   "label": "HR Controls"
+  },
+  {
+   "fieldname": "require_separate_contract_approval",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Require Separate Contract Approval",
+   "description": "The user who submits an employment contract may not approve it."
+  },
+  {
+   "fieldname": "require_separate_salary_change_approval",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Require Separate Salary Change Approval",
+   "description": "The user who requests a salary change may not approve it."
+  },
+  {
+   "fieldname": "require_separate_advance_approval",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Require Separate Advance Approval"
+  },
+  {
+   "fieldname": "column_break_hr_controls",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "contract_expiry_thresholds",
+   "fieldtype": "Data",
+   "default": "90,60,30,15,7",
+   "label": "Contract Expiry Reminders (days)",
+   "description": "Comma-separated. Contracts ending within the largest value are shown as Expiring."
+  },
+  {
+   "fieldname": "document_expiry_thresholds",
+   "fieldtype": "Data",
+   "default": "90,60,30,15,7",
+   "label": "Document Expiry Reminders (days)"
+  },
+  {
+   "fieldname": "probation_review_window_days",
+   "fieldtype": "Int",
+   "default": "30",
+   "label": "Probation Review Window (days)",
+   "description": "How long before a probation ends the review is flagged as due."
   }
  ],
  "index_web_pages_for_search": 1,

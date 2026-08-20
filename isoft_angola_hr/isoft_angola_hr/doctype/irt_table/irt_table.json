@@ -87,6 +87,27 @@
    "role": "HR Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Finance Approver",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
   }
  ],
  "sort_field": "modified",

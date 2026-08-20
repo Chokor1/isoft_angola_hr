@@ -11,6 +11,7 @@
   "company",
   "column_break_4",
   "from_date",
+  "to_date",
   "currency",
   "irt_table",
   "earnings_section",
@@ -54,6 +55,12 @@
    "label": "From Date",
    "reqd": 1,
    "in_list_view": 1
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "label": "To Date",
+   "description": "Optional. Leave empty for an open-ended profile; the most recent effective profile wins. Set it to close a period explicitly."
   },
   {
    "fieldname": "currency",
@@ -119,6 +126,31 @@
    "role": "HR Manager",
    "share": 1,
    "write": 1
+  },
+  {
+   "role": "HR User",
+   "create": 1,
+   "write": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "create": 1,
+   "write": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
   }
  ],
  "sort_field": "modified",

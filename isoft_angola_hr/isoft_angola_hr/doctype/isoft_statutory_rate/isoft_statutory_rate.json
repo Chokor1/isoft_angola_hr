@@ -1,0 +1,144 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-10 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "effective_from",
+  "company",
+  "column_break_3",
+  "disabled",
+  "social_security_section",
+  "ss_employee_rate",
+  "ss_employer_rate",
+  "column_break_8",
+  "food_allowance_exemption",
+  "transport_allowance_exemption",
+  "notes_section",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "effective_from",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective From",
+   "reqd": 1,
+   "description": "The first payroll date governed by these values. Payroll resolves the most recent rate record effective on or before the period end date."
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Company",
+   "options": "Company",
+   "description": "Leave empty to apply to every company. A company-specific record wins over a global one with the same effective date."
+  },
+  {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled",
+   "default": "0"
+  },
+  {
+   "fieldname": "social_security_section",
+   "fieldtype": "Section Break",
+   "label": "Segurança Social & Exemptions"
+  },
+  {
+   "fieldname": "ss_employee_rate",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Social Security - Employee Rate (%)",
+   "reqd": 1,
+   "description": "Deducted from the employee's remuneration."
+  },
+  {
+   "fieldname": "ss_employer_rate",
+   "fieldtype": "Percent",
+   "in_list_view": 1,
+   "label": "Social Security - Employer Rate (%)",
+   "reqd": 1,
+   "description": "Employer cost. Never reduces the employee's net pay."
+  },
+  {
+   "fieldname": "column_break_8",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "food_allowance_exemption",
+   "fieldtype": "Currency",
+   "label": "Food Allowance Exemption",
+   "description": "Monthly amount of Subsídio de Alimentação exempt from IRT."
+  },
+  {
+   "fieldname": "transport_allowance_exemption",
+   "fieldtype": "Currency",
+   "label": "Transport Allowance Exemption",
+   "description": "Monthly amount of Subsídio de Transporte exempt from IRT."
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes",
+   "description": "Record the legal instrument these values come from (e.g. Decreto n.º 42/08)."
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Statutory Rate",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Finance Approver",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  }
+ ],
+ "sort_field": "effective_from",
+ "sort_order": "DESC",
+ "title_field": "effective_from",
+ "track_changes": 1
+}

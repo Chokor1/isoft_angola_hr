@@ -1,0 +1,374 @@
+/* Isoft Angola HR — Self-Service portal (Employee + Manager).
+ *
+ * Mobile-first. The base rules are the phone layout; media queries add desktop.
+ * Building it the other way round is how you end up with a "responsive" page that is
+ * really a desktop page with things hidden.
+ *
+ * Tokens deliberately mirror the desk console (--ahr-*) so the two halves of the product
+ * look like one application.
+ */
+
+:root {
+	--ss-primary: #2563eb;
+	--ss-primary-2: #1e40af;
+	--ss-bg: #f6f8fb;
+	--ss-card: #ffffff;
+	--ss-border: #e6eaf0;
+	--ss-ink: #1f2937;
+	--ss-muted: #6b7280;
+	--ss-tint: rgba(37, 99, 235, .06);
+	--ss-grad: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+	--ss-shadow: 0 2px 10px rgba(37, 99, 235, .07);
+	--ss-ok: #059669;
+	--ss-warn: #b45309;
+	--ss-bad: #dc2626;
+	--ss-info: #4338ca;
+	--ss-radius: 14px;
+	/* Touch targets. 44px is the smallest reliably tappable control. */
+	--ss-tap: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+	:root {
+		--ss-bg: #16181d; --ss-card: #21242c; --ss-border: #32373f;
+		--ss-ink: #e6e8ec; --ss-muted: #9aa1ac; --ss-tint: rgba(59, 130, 246, .12);
+		--ss-shadow: 0 2px 10px rgba(0, 0, 0, .35);
+		--ss-ok: #34d399; --ss-warn: #fbbf24; --ss-bad: #f87171; --ss-info: #a5b4fc;
+	}
+}
+
+.ss-app { color: var(--ss-ink); font-size: 15px; padding-bottom: 88px; }
+.ss-app *, .ss-app *::before, .ss-app *::after { box-sizing: border-box; }
+body:has(.ss-app) { background: var(--ss-bg); }
+
+/* ---------------------------------------------------------------- header -- */
+.ss-head {
+	background: var(--ss-grad); color: #fff; border-radius: 0 0 22px 22px;
+	padding: 18px 16px 26px; margin: -16px -15px 0;
+}
+.ss-head-row { display: flex; align-items: center; gap: 12px; }
+.ss-avatar {
+	width: 46px; height: 46px; border-radius: 50%; flex: 0 0 46px;
+	background: rgba(255, 255, 255, .22); display: flex; align-items: center;
+	justify-content: center; font-weight: 800; font-size: 17px; letter-spacing: .5px;
+}
+.ss-head h1 { font-size: 18px; font-weight: 800; margin: 0; line-height: 1.25; color: #fff; }
+.ss-head .ss-sub { font-size: 12.5px; opacity: .88; margin-top: 2px; }
+.ss-head-link {
+	margin-left: auto; color: #fff; font-size: 12px; font-weight: 700;
+	background: rgba(255, 255, 255, .18); border: 0; border-radius: 9px;
+	min-height: 36px; padding: 0 12px; display: inline-flex; align-items: center; gap: 6px;
+}
+.ss-head-link:hover, .ss-head-link:focus { background: rgba(255, 255, 255, .3); color: #fff; }
+
+/* ------------------------------------------------------------------ nav --- */
+/* Phone: a fixed bottom bar — thumbs live at the bottom of the screen. */
+.ss-nav {
+	position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+	display: flex; background: var(--ss-card); border-top: 1px solid var(--ss-border);
+	padding-bottom: env(safe-area-inset-bottom, 0);
+	overflow-x: auto; -webkit-overflow-scrolling: touch;
+}
+.ss-nav button {
+	flex: 1 0 auto; min-width: 62px; min-height: 56px; border: 0; background: none;
+	color: var(--ss-muted); font-size: 10.5px; font-weight: 700; padding: 7px 4px 6px;
+	display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer;
+}
+.ss-nav button i { font-size: 17px; }
+.ss-nav button[aria-current="page"] { color: var(--ss-primary); }
+.ss-nav button[aria-current="page"] i { transform: translateY(-1px); }
+.ss-nav button:focus-visible { outline: 2px solid var(--ss-primary); outline-offset: -3px; }
+
+/* --------------------------------------------------------------- content -- */
+.ss-body { margin-top: -14px; padding: 0 1px; }
+.ss-view:focus { outline: none; }
+.ss-section-title {
+	font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px;
+	color: var(--ss-muted); margin: 22px 2px 9px;
+}
+.ss-card {
+	background: var(--ss-card); border: 1px solid var(--ss-border);
+	border-radius: var(--ss-radius); box-shadow: var(--ss-shadow);
+	padding: 14px 15px; margin-bottom: 12px;
+}
+.ss-card h2 { font-size: 14.5px; font-weight: 800; margin: 0 0 10px; color: var(--ss-ink); }
+.ss-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ss-card-head h2 { margin: 0; }
+.ss-card-head .ss-btn { margin-left: auto; }
+
+.ss-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.ss-metric {
+	background: var(--ss-card); border: 1px solid var(--ss-border);
+	border-radius: var(--ss-radius); padding: 13px 14px; box-shadow: var(--ss-shadow);
+	border-left: 4px solid var(--ss-primary);
+}
+.ss-metric .k {
+	font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .5px;
+	color: var(--ss-muted); line-height: 1.3;
+}
+.ss-metric .v { font-size: 21px; font-weight: 800; margin-top: 3px; line-height: 1.15; }
+.ss-metric .h { font-size: 11.5px; color: var(--ss-muted); margin-top: 2px; }
+.ss-metric.ok { border-left-color: var(--ss-ok); }
+.ss-metric.warn { border-left-color: var(--ss-warn); }
+.ss-metric.bad { border-left-color: var(--ss-bad); }
+
+/* Definition rows — the profile and payslip screens are mostly these. */
+.ss-kv { display: flex; gap: 12px; padding: 9px 0; border-bottom: 1px dashed var(--ss-border); }
+.ss-kv:last-child { border-bottom: 0; }
+.ss-kv dt { flex: 0 0 42%; font-size: 12.5px; color: var(--ss-muted); font-weight: 600; margin: 0; }
+.ss-kv dd { flex: 1; margin: 0; font-size: 13.5px; font-weight: 600; text-align: right;
+	word-break: break-word; }
+.ss-kv dd.num { font-variant-numeric: tabular-nums; }
+
+/* Lists. On a phone every table becomes a stack of cards — see .ss-list. */
+.ss-list { list-style: none; margin: 0; padding: 0; }
+.ss-list > li {
+	background: var(--ss-card); border: 1px solid var(--ss-border);
+	border-radius: var(--ss-radius); box-shadow: var(--ss-shadow);
+	padding: 12px 14px; margin-bottom: 10px; display: block; width: 100%; text-align: left;
+}
+.ss-list > li.tap { cursor: pointer; }
+.ss-list > li.tap:focus-visible { outline: 2px solid var(--ss-primary); outline-offset: 2px; }
+.ss-li-top { display: flex; align-items: flex-start; gap: 10px; }
+.ss-li-title { font-weight: 700; font-size: 14px; line-height: 1.3; }
+.ss-li-sub { font-size: 12px; color: var(--ss-muted); margin-top: 2px; line-height: 1.4; }
+.ss-li-right { margin-left: auto; text-align: right; flex: 0 0 auto; }
+.ss-li-amount { font-weight: 800; font-size: 15px; font-variant-numeric: tabular-nums; }
+.ss-li-actions { display: flex; gap: 8px; margin-top: 11px; flex-wrap: wrap; }
+
+/* Badges never rely on colour alone — each carries a word (§21). */
+.ss-badge {
+	display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 800;
+	padding: 3px 9px; border-radius: 999px; border: 1px solid transparent;
+	white-space: nowrap; letter-spacing: .2px;
+}
+.ss-badge.ok { background: rgba(5, 150, 105, .12); color: var(--ss-ok); border-color: rgba(5, 150, 105, .3); }
+.ss-badge.warn { background: rgba(180, 83, 9, .12); color: var(--ss-warn); border-color: rgba(180, 83, 9, .3); }
+.ss-badge.bad { background: rgba(220, 38, 38, .12); color: var(--ss-bad); border-color: rgba(220, 38, 38, .3); }
+.ss-badge.info { background: rgba(67, 56, 202, .12); color: var(--ss-info); border-color: rgba(67, 56, 202, .3); }
+.ss-badge.mute { background: var(--ss-tint); color: var(--ss-muted); border-color: var(--ss-border); }
+
+/* ----------------------------------------------------------------- forms -- */
+.ss-field { margin-bottom: 13px; }
+.ss-field label { display: block; font-size: 12px; font-weight: 700; color: var(--ss-muted);
+	margin-bottom: 5px; }
+.ss-field input, .ss-field select, .ss-field textarea {
+	width: 100%; min-height: var(--ss-tap); font-size: 15px; /* 15px+ stops iOS zooming on focus */
+	padding: 9px 11px; border-radius: 10px; border: 1px solid var(--ss-border);
+	background: var(--ss-card); color: var(--ss-ink);
+}
+.ss-field textarea { min-height: 78px; resize: vertical; }
+.ss-field input:focus, .ss-field select:focus, .ss-field textarea:focus {
+	outline: none; border-color: var(--ss-primary); box-shadow: 0 0 0 3px var(--ss-tint);
+}
+.ss-field .hint { font-size: 11.5px; color: var(--ss-muted); margin-top: 4px; }
+.ss-field.err input, .ss-field.err select, .ss-field.err textarea { border-color: var(--ss-bad); }
+.ss-field .err-msg { font-size: 12px; color: var(--ss-bad); margin-top: 4px; font-weight: 600; }
+.ss-check { display: flex; align-items: center; gap: 9px; min-height: var(--ss-tap); }
+.ss-check input { width: 20px; height: 20px; min-height: 20px; flex: 0 0 20px; }
+.ss-check label { margin: 0; font-size: 13.5px; color: var(--ss-ink); font-weight: 600; }
+
+.ss-btn {
+	display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+	min-height: var(--ss-tap); padding: 0 15px; border-radius: 10px; font-size: 13.5px;
+	font-weight: 700; border: 1px solid var(--ss-border); background: var(--ss-card);
+	color: var(--ss-ink); cursor: pointer; text-decoration: none;
+}
+.ss-btn:hover { border-color: var(--ss-primary); color: var(--ss-primary); text-decoration: none; }
+.ss-btn:focus-visible { outline: 2px solid var(--ss-primary); outline-offset: 2px; }
+.ss-btn[disabled] { opacity: .5; cursor: not-allowed; }
+.ss-btn.primary { background: var(--ss-primary); border-color: var(--ss-primary); color: #fff; }
+.ss-btn.primary:hover { background: var(--ss-primary-2); border-color: var(--ss-primary-2); color: #fff; }
+.ss-btn.ok { border-color: var(--ss-ok); color: var(--ss-ok); }
+.ss-btn.bad { border-color: var(--ss-bad); color: var(--ss-bad); }
+/* A "small" button is only small on a pointer device. On a phone it still has to be
+ * tappable, so it keeps the 40px floor and shrinks only from the tablet breakpoint up.
+ * Browser UAT at 375/390/430 caught this at 34px. */
+.ss-btn.sm { min-height: 40px; font-size: 12.5px; padding: 0 12px; }
+.ss-btn.block { width: 100%; }
+
+/* ------------------------------------------------------- states & modals -- */
+.ss-empty { text-align: center; padding: 34px 18px; color: var(--ss-muted); }
+.ss-empty i { font-size: 30px; opacity: .38; display: block; margin-bottom: 11px; }
+.ss-empty p { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+.ss-empty small { font-size: 12.5px; }
+
+/* Skeletons, not spinners: the page keeps its shape while it loads (§71). */
+.ss-skel { border-radius: 8px; background: var(--ss-border); animation: ss-pulse 1.25s ease-in-out infinite; }
+.ss-skel-card { height: 74px; margin-bottom: 10px; border-radius: var(--ss-radius); }
+.ss-skel-line { height: 13px; margin-bottom: 9px; }
+@keyframes ss-pulse { 0%, 100% { opacity: .55; } 50% { opacity: .95; } }
+@media (prefers-reduced-motion: reduce) { .ss-skel { animation: none; } }
+
+.ss-alert {
+	border-radius: 12px; padding: 11px 13px; font-size: 13px; margin-bottom: 12px;
+	border: 1px solid; display: flex; gap: 10px; align-items: flex-start; line-height: 1.45;
+}
+.ss-alert i { margin-top: 2px; }
+.ss-alert.warn { background: rgba(180, 83, 9, .09); border-color: rgba(180, 83, 9, .3); color: var(--ss-warn); }
+.ss-alert.bad { background: rgba(220, 38, 38, .09); border-color: rgba(220, 38, 38, .3); color: var(--ss-bad); }
+.ss-alert.info { background: var(--ss-tint); border-color: var(--ss-border); color: var(--ss-ink); }
+
+.ss-modal-back {
+	position: fixed; inset: 0; background: rgba(15, 23, 42, .5); z-index: 60;
+	display: flex; align-items: flex-end; justify-content: center; padding: 0;
+}
+.ss-modal {
+	background: var(--ss-card); width: 100%; max-height: 92vh; overflow-y: auto;
+	border-radius: 20px 20px 0 0; padding: 16px 16px calc(18px + env(safe-area-inset-bottom, 0));
+	-webkit-overflow-scrolling: touch;
+}
+.ss-modal-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.ss-modal-head h2 { font-size: 16px; font-weight: 800; margin: 0; }
+.ss-modal-close {
+	margin-left: auto; border: 0; background: var(--ss-tint); color: var(--ss-ink);
+	width: 36px; height: 36px; border-radius: 50%; font-size: 15px; cursor: pointer;
+}
+.ss-modal-foot { display: flex; gap: 9px; margin-top: 16px; }
+.ss-modal-foot .ss-btn { flex: 1; }
+
+.ss-toast-wrap { position: fixed; left: 12px; right: 12px; bottom: 74px; z-index: 80;
+	display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.ss-toast {
+	background: var(--ss-ink); color: var(--ss-bg); border-radius: 11px; padding: 11px 14px;
+	font-size: 13.5px; font-weight: 600; box-shadow: 0 8px 22px rgba(0, 0, 0, .26);
+	line-height: 1.4;
+}
+.ss-toast.ok { background: var(--ss-ok); color: #fff; }
+.ss-toast.bad { background: var(--ss-bad); color: #fff; }
+
+/* Screen-reader-only live region for status announcements. */
+.ss-sr {
+	position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+	overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* --------------------------------------------------------------- payslip -- */
+.ss-pay-total {
+	display: flex; align-items: baseline; gap: 10px; padding: 13px 0 3px;
+	border-top: 2px solid var(--ss-ink); margin-top: 10px;
+}
+.ss-pay-total .l { font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .6px; }
+.ss-pay-total .v { margin-left: auto; font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ss-explain { background: var(--ss-tint); border-radius: 12px; padding: 13px 14px; margin-top: 12px; }
+.ss-explain h3 { font-size: 13px; font-weight: 800; margin: 0 0 9px; }
+.ss-explain .grp { margin-bottom: 11px; }
+.ss-explain .grp:last-child { margin-bottom: 0; }
+.ss-explain .grp b { display: block; font-size: 12.5px; margin-bottom: 3px; }
+.ss-explain .grp span { display: block; font-size: 12.5px; color: var(--ss-muted); line-height: 1.55; }
+
+/* ------------------------------------------------------------ attendance -- */
+.ss-cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.ss-cal .dow { font-size: 10px; font-weight: 800; color: var(--ss-muted); text-align: center;
+	padding-bottom: 4px; text-transform: uppercase; }
+.ss-cal .day {
+	aspect-ratio: 1; border-radius: 8px; display: flex; flex-direction: column;
+	align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+	border: 1px solid var(--ss-border); background: var(--ss-card); position: relative;
+}
+.ss-cal .day.pad { border: 0; background: none; }
+.ss-cal .day .mk { font-size: 8.5px; font-weight: 800; letter-spacing: .3px; margin-top: 1px; }
+.ss-cal .day.p { background: rgba(5, 150, 105, .12); border-color: rgba(5, 150, 105, .35); color: var(--ss-ok); }
+.ss-cal .day.a { background: rgba(220, 38, 38, .12); border-color: rgba(220, 38, 38, .35); color: var(--ss-bad); }
+.ss-cal .day.l { background: rgba(67, 56, 202, .12); border-color: rgba(67, 56, 202, .35); color: var(--ss-info); }
+.ss-cal .day.h { background: rgba(180, 83, 9, .12); border-color: rgba(180, 83, 9, .35); color: var(--ss-warn); }
+.ss-cal-key { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 11px; font-size: 11.5px;
+	color: var(--ss-muted); }
+.ss-cal-key span { display: inline-flex; align-items: center; gap: 5px; }
+.ss-cal-key i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+/* Tables are desktop-only; on a phone the same data renders as .ss-list cards. */
+.ss-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -3px; }
+.ss-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ss-table th {
+	text-align: left; font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+	letter-spacing: .5px; color: var(--ss-muted); padding: 8px 10px;
+	border-bottom: 2px solid var(--ss-border); white-space: nowrap;
+}
+.ss-table td { padding: 10px; border-bottom: 1px solid var(--ss-border); vertical-align: middle; }
+.ss-table td.num, .ss-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ss-table tbody tr:hover { background: var(--ss-tint); }
+
+.ss-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.ss-filters input, .ss-filters select {
+	min-height: 38px; font-size: 13.5px; padding: 5px 10px; border-radius: 9px;
+	border: 1px solid var(--ss-border); background: var(--ss-card); color: var(--ss-ink);
+	flex: 1 1 150px; min-width: 0;
+}
+
+/* ================================================================ desktop = */
+@media (min-width: 768px) {
+	.ss-app { padding-bottom: 40px; font-size: 14px; }
+	.ss-head { border-radius: 18px; margin: 0 0 16px; padding: 20px 24px 24px; }
+	.ss-head h1 { font-size: 21px; }
+
+	/* Nav moves from a fixed bottom bar to inline tabs. */
+	.ss-nav {
+		position: static; border-top: 0; border: 1px solid var(--ss-border);
+		border-radius: 12px; padding: 5px; gap: 3px; margin-bottom: 16px;
+		box-shadow: var(--ss-shadow); overflow-x: auto;
+	}
+	.ss-nav button {
+		flex: 0 1 auto; min-height: 40px; flex-direction: row; gap: 7px; font-size: 13px;
+		border-radius: 9px; padding: 0 14px;
+	}
+	.ss-nav button i { font-size: 13.5px; }
+	.ss-nav button[aria-current="page"] { background: var(--ss-primary); color: #fff; }
+
+	/* Pointer devices — a compact button is fine here. */
+	.ss-btn.sm { min-height: 34px; padding: 0 11px; }
+
+	.ss-body { margin-top: 0; }
+	.ss-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+	.ss-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px;
+		align-items: start; }
+	.ss-kv dt { flex: 0 0 34%; }
+
+	.ss-modal-back { align-items: center; padding: 24px; }
+	.ss-modal { max-width: 540px; border-radius: 18px; }
+	.ss-toast-wrap { left: auto; right: 20px; bottom: 20px; width: 340px; }
+
+	/* On desktop, list-cards give way to real tables where one is defined. */
+	.ss-desktop-table .ss-list { display: none; }
+	.ss-desktop-table .ss-table-wrap { display: block; }
+}
+
+@media (max-width: 767px) {
+	/* No horizontal scrolling on a phone, ever (§20). */
+	.ss-desktop-table .ss-table-wrap { display: none; }
+	.ss-table-wrap { max-width: 100%; }
+}
+
+@media (min-width: 1200px) {
+	.ss-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+	.ss-three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+		align-items: start; }
+}
+
+@media print {
+	.ss-nav, .ss-head-link, .ss-li-actions, .ss-btn { display: none !important; }
+	.ss-app { padding: 0; }
+	.ss-card { break-inside: avoid; box-shadow: none; }
+}
+
+/* ---------------------------------------------------- page chrome ------- */
+/* The self-service area is a focused application, not a page on the corporate
+ * website. The site's newsletter sign-up, product footer and global search are
+ * noise here and, worse, they invite an employee into parts of the ERP they have
+ * no business in. Scoped to the body class set by ess.py / mss.py so no other
+ * portal page is affected. */
+body.isoft-ss-page { background: var(--ss-bg); }
+body.isoft-ss-page .web-footer,
+body.isoft-ss-page footer,
+body.isoft-ss-page .navbar .navbar-nav,
+body.isoft-ss-page .navbar form,
+body.isoft-ss-page #navbar-search,
+body.isoft-ss-page .website-search { display: none !important; }
+body.isoft-ss-page .navbar { border: 0; background: transparent; box-shadow: none;
+	min-height: 0; padding: 0; }
+body.isoft-ss-page .page-content-wrapper { padding-top: 0; }
+body.isoft-ss-page main.container { padding-left: 15px; padding-right: 15px; }
+
+@media (min-width: 768px) {
+	body.isoft-ss-page main.container { max-width: 1180px; }
+}

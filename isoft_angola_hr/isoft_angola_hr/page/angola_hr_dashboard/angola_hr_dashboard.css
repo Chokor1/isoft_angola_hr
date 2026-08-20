@@ -102,23 +102,61 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 
 @media (max-width: 760px) { .ahr-brand-meta { display: none; } }
 
-/* ---------------- Cards ---------------- */
-.ahr-cards { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
-.ahr-card {
-	flex: 1 1 190px; background: var(--ahr-card);
-	border: 1px solid var(--ahr-border); border-radius: 14px; padding: 18px 20px;
-	box-shadow: var(--ahr-shadow); position: relative; overflow: hidden; transition: all .2s;
+/* ---------------- Metric row (§8, §9) ----------------
+ * The figure is the point of the card, so it is the strongest thing in it:
+ * the label is small, muted and uppercase; the value is large and dark. The
+ * old card gave both the same weight and decorated itself with a gradient
+ * bar and a floating circle, which competed with the number.
+ * Equal height, equal width, no shadow, no lift on hover.
+ * ---------------------------------------------------- */
+/* Flex rather than grid, and capped as well as floored (§8).
+ *
+ * A grid with a fixed track width broke six metrics into a row of five and a
+ * lonely sixth; one with 1fr tracks stretched three metrics across a 1600px
+ * screen. Flex does what is wanted in both cases: every card is at least
+ * 178px, they share the spare width equally up to 258px, and they wrap only
+ * when they genuinely run out of room (§40). Stretch gives them equal height. */
+.ahr-cards, .ahr-metrics {
+	display: flex; flex-wrap: wrap; align-items: stretch;
+	gap: 14px; margin-bottom: var(--ahr-gap-section);
 }
-.ahr-card::before {
-	content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--ahr-grad);
+.ahr-card, .ahr-metric { flex: 1 1 178px; max-width: 258px; }
+@media (max-width: 620px) {
+	.ahr-card, .ahr-metric { flex: 1 1 140px; max-width: none; }
 }
-.ahr-card::after {
-	content: ""; position: absolute; right: -18px; top: -10px; width: 64px; height: 64px;
-	border-radius: 50%; background: var(--ahr-grad); opacity: .12;
+.ahr-card, .ahr-metric {
+	display: flex; flex-direction: column; justify-content: flex-start;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border);
+	border-radius: var(--ahr-r-md); padding: 15px 17px;
+	transition: border-color .15s;
 }
-.ahr-card:hover { transform: translateY(-3px); box-shadow: var(--ahr-shadow-lg); }
-.ahr-card .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .6px; color: var(--ahr-primary); font-weight: 700; opacity: .85; }
-.ahr-card .val { font-size: 28px; font-weight: 700; margin-top: 6px; color: var(--ahr-ink); }
+.ahr-card:hover, .ahr-metric:hover { border-color: var(--ahr-border-strong); }
+.ahr-metric-head {
+	display: flex; align-items: center; gap: 7px; margin-bottom: 9px;
+}
+.ahr-metric-head i { font-size: 11px; color: var(--ahr-primary); opacity: .85; }
+/* `.lbl`/`.k` are the two label classes already in the markup. */
+.ahr-card .lbl, .ahr-card .k, .ahr-metric-label {
+	font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px;
+	color: var(--ahr-muted); font-weight: 700; line-height: 1.3;
+}
+.ahr-card .val, .ahr-card .v, .ahr-metric-value {
+	font-size: 27px; font-weight: 800; line-height: 1.1; margin-top: 7px;
+	color: var(--ahr-ink); font-variant-numeric: tabular-nums; letter-spacing: -.6px;
+}
+.ahr-metric-head + .ahr-metric-value { margin-top: 0; }
+.ahr-metric-foot {
+	margin-top: 6px; font-size: 11.5px; color: var(--ahr-muted); line-height: 1.35;
+}
+/* State accents, used only where a figure means something is wrong (§36). */
+.ahr-metric.warn { border-color: rgba(245, 158, 11, .45); background: rgba(245, 158, 11, .05); }
+.ahr-metric.warn .ahr-metric-head i { color: #b45309; }
+.ahr-metric.err { border-color: rgba(239, 68, 68, .40); background: rgba(239, 68, 68, .04); }
+.ahr-metric.err .ahr-metric-head i { color: #b91c1c; }
+.ahr-metric.ok .ahr-metric-head i { color: #047857; }
+/* Clickable metrics say so. */
+.ahr-metric.clickable { cursor: pointer; }
+.ahr-metric.clickable:hover { border-color: var(--ahr-accent); background: var(--ahr-tint); }
 
 /* ---------------- Charts (overview) ---------------- */
 .ahr-chart-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; margin-bottom: 18px; }
@@ -137,42 +175,168 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 .ahr-hol-in { font-size: 11px; font-weight: 700; color: var(--ahr-primary); background: var(--ahr-tint-2); padding: 2px 10px; border-radius: 20px; white-space: nowrap; }
 
 /* ---------------- Panels ---------------- */
-.ahr-panel {
-	background: var(--ahr-card); border: 1px solid var(--ahr-border);
-	border-radius: 14px; padding: 18px 20px; margin-bottom: 18px; box-shadow: var(--ahr-shadow);
+/* =====================================================================
+ * DESIGN SYSTEM — four levels of hierarchy
+ *
+ *   PAGE        the console itself: the nav bar and the help strip
+ *   SECTION     .ahr-panel / .ahr-section — a real content area with its
+ *               own header: icon, title, one line of explanation, actions
+ *   SUBSECTION  .ahr-subsection — lighter: a rule and a label, no card
+ *   CONTENT     metrics, tables, charts, filters, callouts
+ *
+ * The section keeps the class name `.ahr-panel` because JavaScript and the
+ * table-scroll layout both select on it; `.ahr-section` is the name to use
+ * in new markup and reads better. They are the same component.
+ *
+ * Depth comes from spacing, type and a single hairline border — not from
+ * shadow. Nothing here floats.
+ * ===================================================================== */
+
+:root {
+	--ahr-r-lg: 14px;      /* sections */
+	--ahr-r-md: 12px;      /* metrics, callouts, filter bar */
+	--ahr-r-sm: 9px;       /* controls, chips */
+	--ahr-gap-section: 20px;
 }
-.ahr-panel h5 {
-	margin: -2px -2px 14px; padding: 0 0 11px 12px; position: relative;
-	font-weight: 700; font-size: 14px; color: var(--ahr-ink);
+
+.ahr-panel, .ahr-section {
+	background: var(--ahr-card); border: 1px solid var(--ahr-border);
+	border-radius: var(--ahr-r-lg); padding: 18px 20px;
+	margin-bottom: var(--ahr-gap-section);
+}
+
+/* ---- Section header ---- */
+.ahr-section-head {
+	display: flex; align-items: flex-start; gap: 12px;
+	padding-bottom: 13px; margin: -2px 0 16px;
 	border-bottom: 1px solid var(--ahr-border);
 }
-.ahr-panel h5::before {
-	content: ""; position: absolute; left: 0; top: 1px; width: 4px; height: 15px;
-	border-radius: 4px; background: var(--ahr-grad);
+.ahr-section-ico {
+	flex: 0 0 auto; width: 30px; height: 30px; border-radius: var(--ahr-r-sm);
+	display: flex; align-items: center; justify-content: center;
+	background: var(--ahr-tint-2); color: var(--ahr-primary); font-size: 13px;
+}
+.ahr-section-heading { flex: 1 1 auto; min-width: 0; }
+/* h5 is kept as the title element: existing markup, tests and styles find it. */
+.ahr-panel h5, .ahr-section-title {
+	margin: 0; font-weight: 700; font-size: 15px; line-height: 1.3;
+	color: var(--ahr-ink); letter-spacing: -.1px;
+}
+.ahr-section-sub {
+	margin-top: 3px; font-size: 12px; line-height: 1.45; color: var(--ahr-muted);
+}
+.ahr-section-actions {
+	flex: 0 0 auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.ahr-section-actions .btn { border-radius: var(--ahr-r-sm); font-size: 12.5px; }
+
+/* A section header with no icon keeps a small blue tick, so the old accent
+ * survives as an accent rather than as the whole design. */
+.ahr-section-head.no-ico .ahr-section-heading { position: relative; padding-left: 12px; }
+.ahr-section-head.no-ico .ahr-section-heading::before {
+	content: ""; position: absolute; left: 0; top: 3px; width: 3px; height: 15px;
+	border-radius: 3px; background: var(--ahr-grad);
 }
 
-/* List summary line above filtered tables */
-.ahr-list-meta { font-size: 12px; color: var(--ahr-primary); margin-bottom: 10px; font-weight: 700; opacity: .9; }
+/* ---- Subsection: lighter, never another card (§7) ---- */
+.ahr-subsection { margin-top: 18px; }
+.ahr-subsection:first-child { margin-top: 0; }
+.ahr-subsection-head {
+	display: flex; align-items: baseline; gap: 12px;
+	padding-bottom: 8px; margin-bottom: 12px;
+	border-bottom: 1px solid var(--ahr-border);
+}
+.ahr-subsection-title {
+	font-size: 13px; font-weight: 700; color: var(--ahr-ink); margin: 0;
+	flex: 0 0 auto;
+}
+.ahr-subsection-sub { font-size: 12px; color: var(--ahr-muted); flex: 1 1 auto; min-width: 0; }
+.ahr-subsection-meta {
+	flex: 0 0 auto; font-size: 11.5px; font-weight: 700; color: var(--ahr-muted);
+	white-space: nowrap;
+}
 
-/* ---------------- Tables ---------------- */
+/* On a phone a header becomes a stack: title, then description, then the
+ * actions on their own full-width line. Squeezed into columns the description
+ * wrapped to five words a line and the actions were pushed to nothing (§41). */
+@media (max-width: 700px) {
+	.ahr-section-head { flex-wrap: wrap; }
+	.ahr-section-heading { flex: 1 1 100%; order: 2; }
+	.ahr-section-ico { order: 1; }
+	.ahr-section-actions { order: 3; flex: 1 1 100%; margin-top: 10px; }
+	.ahr-section-actions .btn { flex: 1 1 auto; }
+	.ahr-subsection-head { flex-direction: column; align-items: stretch; gap: 4px; }
+	.ahr-subsection-meta { align-self: flex-start; }
+}
+
+/* ---- Section status badge (§19) ---- */
+.ahr-section-tag {
+	display: inline-flex; align-items: center; gap: 5px;
+	font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 20px;
+	background: var(--ahr-tint-2); color: var(--ahr-primary); white-space: nowrap;
+}
+.ahr-section-tag.warn { background: rgba(245, 158, 11, .14); color: #b45309; }
+.ahr-section-tag.ok { background: rgba(16, 185, 129, .14); color: #047857; }
+.ahr-section-tag.err { background: rgba(239, 68, 68, .13); color: #b91c1c; }
+[data-theme="dark"] .ahr-section-tag.warn { color: #fbbf24; }
+[data-theme="dark"] .ahr-section-tag.ok { color: #34d399; }
+[data-theme="dark"] .ahr-section-tag.err { color: #f87171; }
+
+/* The summary line above a filtered list ("31 occurrences", "73 salary slips ·
+ * Total Net: …"). Several screens put their table straight into a panel with no
+ * header, so this line is the only thing naming what is below it — it is styled
+ * as a subsection header rather than a stray caption, which gives those tables a
+ * visible owner without touching seven view functions (§13). */
+.ahr-list-meta {
+	display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+	font-size: 12.5px; font-weight: 700; color: var(--ahr-ink);
+	padding-bottom: 9px; margin-bottom: 12px;
+	border-bottom: 1px solid var(--ahr-border);
+}
+
+/* ---------------- Tables (§14, §15) ----------------
+ * Rows carry the data, so they get the contrast. The header is separated by a
+ * solid rule rather than by shouting: still uppercase, but a touch larger and
+ * in the muted ink rather than blue, which was competing with the values.
+ * Zebra striping is dropped — with a consistent row height and a hairline
+ * between rows it added noise without adding legibility (§33).
+ * -------------------------------------------------- */
 .ahr-table { width: 100%; border-collapse: collapse; font-size: 13px; color: var(--ahr-ink); }
-.ahr-table th, .ahr-table td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--ahr-border); }
-.ahr-table th {
-	font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--ahr-primary);
-	font-weight: 700; background: var(--ahr-tint); border-bottom: 2px solid var(--ahr-border-strong);
+.ahr-table th, .ahr-table td {
+	padding: 11px 12px; text-align: left; border-bottom: 1px solid var(--ahr-border);
+	vertical-align: middle;
 }
-.ahr-table tbody tr:nth-child(even) { background: var(--ahr-tint); }
-.ahr-table tbody tr.clickable { cursor: pointer; transition: background .12s; }
+.ahr-table th {
+	font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--ahr-muted);
+	font-weight: 700; background: var(--ahr-card);
+	border-bottom: 2px solid var(--ahr-border-strong); white-space: nowrap;
+}
+.ahr-table tbody tr { transition: background .12s; }
+.ahr-table tbody tr:hover { background: var(--ahr-tint); }
+.ahr-table tbody tr.clickable { cursor: pointer; }
 .ahr-table tbody tr.clickable:hover { background: var(--ahr-tint-2); }
 .ahr-table tbody tr:last-child td { border-bottom: none; }
+/* An actions column is separated from the data rather than run into it. */
+.ahr-table td:last-child .btn, .ahr-table td .btn { border-radius: var(--ahr-r-sm); }
 .ahr-table td.num, .ahr-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* An editable numeric column: the input is a block with a max-width, so
+ * text-align on the cell moves the digits inside the box but leaves the box
+ * itself hard left, under a right-aligned header. Pushing the box over is what
+ * actually lines the column up (the IRT bracket table). */
+.ahr-table td.num input.input-xs { display: block; margin-left: auto; margin-right: 0; }
+.ahr-table tr.fs-total td { font-weight: 700; border-top: 2px solid var(--ahr-border-strong); background: var(--ahr-tint-2); }
 .ahr-table input.input-xs { padding: 4px 6px; font-size: 12px; border-radius: 6px; text-align: right; max-width: 110px; border: 1px solid var(--ahr-border-strong); background: var(--ahr-card); color: var(--ahr-ink); }
+
+/* Keep the Bulk Allocation controls (incl. the Leave Type autocomplete) above the table */
+.ba-head { position: relative; z-index: 20; }
+.ba-head .awesomplete ul { z-index: 30; }
 
 /* ---- Payroll preview (scrollable) ---- */
 .pv-search-wrap { margin-bottom: 10px; }
 .pv-search-wrap .pv-search { max-width: 360px; border-radius: 9px; border: 1px solid var(--ahr-border-strong); }
 .pv-scroll { max-height: 56vh; overflow: auto; border: 1px solid var(--ahr-border-strong); border-radius: 12px; }
 .pv-table { min-width: 1180px; }
+.pv-table .pv-hide, .pv-table th.pv-hide { display: none; }
 .pv-scroll thead th { position: sticky; top: 0; z-index: 2; }
 .pv-table .pv-c { width: 36px; text-align: center; }
 .pv-table .pv-sub { font-size: 10.5px; color: var(--ahr-muted); margin-top: 2px; }
@@ -186,8 +350,42 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 .ahr-doc-actions { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--ahr-border); text-align: right; }
 .ahr-doc-actions .btn { margin-left: 8px; border-radius: 8px; }
 
-/* ---------------- Filters / fields ---------------- */
-.ahr-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px; }
+/* ---------------- Filter bar (§11, §12) ----------------
+ * Controls must not read as results. The bar gets its own tinted ground and
+ * a hairline, so the eye separates "what I am asking for" from "what came
+ * back" before reading either. The word FILTERS is drawn by CSS rather than
+ * added to twenty call sites.
+ * Buttons inside the bar are pushed to the right, which is what stops action
+ * buttons drifting into the middle of the content (§10).
+ * ------------------------------------------------------- */
+.ahr-filters {
+	display: flex; flex-wrap: wrap; gap: 12px 14px; align-items: flex-end;
+	margin-bottom: 16px; padding: 12px 14px 13px;
+	background: var(--ahr-bg); border: 1px solid var(--ahr-border);
+	border-radius: var(--ahr-r-md); position: relative;
+}
+/* The legend is a flex item, not an absolutely-positioned tag: floated above the
+ * bar it landed on top of the first field's own label. */
+.ahr-filters::before {
+	content: "Filters"; display: flex; align-items: center; align-self: stretch;
+	font-size: 9.5px; font-weight: 800; letter-spacing: .9px; text-transform: uppercase;
+	color: var(--ahr-muted); white-space: nowrap;
+	padding-right: 14px; border-right: 1px solid var(--ahr-border);
+}
+@media (max-width: 700px) {
+	.ahr-filters::before { display: none; }
+}
+/* A bar that holds only buttons is a toolbar, not a filter bar — no legend. */
+.ahr-filters.ahr-toolbar::before { content: none; }
+.ahr-filters .btn { border-radius: var(--ahr-r-sm); }
+/* The first button starts the action group, which sits hard right. */
+.ahr-filters > .btn:first-of-type { margin-left: auto; }
+.ahr-filters .ahr-filter-spacer { flex: 1 1 auto; }
+@media (max-width: 700px) {
+	/* Controls must never be truncated to keep a row (§41). */
+	.ahr-filters > .btn:first-of-type { margin-left: 0; }
+	.ahr-filters .ahr-field { flex: 1 1 100%; }
+}
 .ahr-field { display: flex; flex-direction: column; gap: 5px; }
 .ahr-field label { font-size: 10.5px; color: var(--ahr-primary); text-transform: uppercase; letter-spacing: .4px; font-weight: 700; opacity: .9; }
 .ahr-field input, .ahr-field select {
@@ -224,8 +422,995 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 [data-theme="dark"] .ahr-badge.paid { background: rgba(16,185,129,.18); color: #6ee7b7; border-color: rgba(16,185,129,.38); }
 [data-theme="dark"] .ahr-badge.cancelled { background: rgba(220,48,48,.18); color: #fca5a5; border-color: rgba(220,48,48,.38); }
 .ahr-lock-note { float: left; font-size: 11.5px; color: var(--ahr-muted); font-style: italic; padding-top: 5px; }
-.ahr-empty { padding: 34px; text-align: center; color: var(--ahr-muted); border: 1px dashed var(--ahr-border-strong); border-radius: 12px; }
+/* A one-line "nothing here" message. It is a statement, not a section, so it is
+ * proportionate to the sentence it holds — the 34px box with a dashed frame gave
+ * "No probation review is due." the same visual weight as a table of contracts.
+ * Anything that needs an icon and a call to action uses .ahr-empty-state. */
+.ahr-empty {
+	padding: 16px 4px; text-align: center; color: var(--ahr-muted);
+	font-size: 12.5px; border: none; border-radius: 0;
+}
 .ahr-form-grid { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 14px; color: var(--ahr-ink); }
 .ahr-form-grid > div { font-size: 13px; }
 @media (max-width: 1100px) { .ahr-form-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
 @media (max-width: 720px) { .ahr-form-grid { grid-template-columns: 1fr; } }
+
+/* ---------------- Payroll readiness (pre-flight) ---------------- */
+.ahr-ready-tiles { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 12px; }
+@media (max-width: 900px) { .ahr-ready-tiles { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+.ahr-ready-tile {
+	border: 1px solid var(--ahr-border-strong); border-radius: 12px; padding: 14px 12px;
+	text-align: center; background: var(--ahr-card);
+}
+.ahr-ready-tile .n { font-size: 24px; font-weight: 700; line-height: 1.1; color: var(--ahr-ink); }
+.ahr-ready-tile .l { font-size: 11.5px; color: var(--ahr-muted); margin-top: 4px; }
+.ahr-ready-tile.ok .n { color: #1f9254; }
+.ahr-ready-tile.danger .n { color: #b03030; }
+.ahr-ready-tile.warn .n { color: #d98300; }
+.ahr-ready-tile.pay .n { color: #1565c0; }
+.ahr-ready-sec { margin-top: 14px; }
+.ahr-ready-sec h6 {
+	font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; margin: 0 0 6px;
+	color: var(--ahr-muted); font-weight: 700;
+}
+.ahr-ready-sec ul { list-style: none; padding: 0; margin: 0; }
+.ahr-ready-sec li {
+	display: flex; justify-content: space-between; align-items: center; gap: 10px;
+	padding: 6px 10px; border-radius: 8px; font-size: 12.5px; margin-bottom: 4px;
+	border: 1px solid var(--ahr-border);
+}
+.ahr-ready-sec.blocking li { background: #fbe7e7; border-color: #f1cccc; }
+.ahr-ready-sec.payment li { background: #e6f0fd; border-color: #c7defa; }
+.ahr-ready-sec.warning li { background: #fff4e0; border-color: #ffe2b3; }
+[data-theme="dark"] .ahr-ready-sec.blocking li { background: rgba(220,48,48,.16); border-color: rgba(220,48,48,.34); }
+[data-theme="dark"] .ahr-ready-sec.payment li { background: rgba(37,99,235,.18); border-color: rgba(37,99,235,.36); }
+[data-theme="dark"] .ahr-ready-sec.warning li { background: rgba(217,131,0,.16); border-color: rgba(217,131,0,.34); }
+.ahr-badge.danger { background: #fbe7e7; color: #b03030; border-color: #f1cccc; }
+.ahr-badge.calculated { background: #eef2ff; color: #4338ca; border-color: #d5dbfa; }
+.ahr-badge.pending-approval { background: #fff4e0; color: #d98300; border-color: #ffe2b3; }
+.ahr-badge.rejected { background: #fbe7e7; color: #b03030; border-color: #f1cccc; }
+.ahr-badge.approved { background: #e6f0fd; color: #1565c0; border-color: #c7defa; }
+.ahr-badge.posted { background: #e7edfd; color: #1e40af; border-color: #c7d6fa; }
+.ahr-badge.payment-ready { background: #e3f2fd; color: #0277bd; border-color: #bbdefb; }
+.ahr-badge.closed { background: #eceff1; color: #455a64; border-color: #cfd8dc; }
+
+/* ---------------- Payroll next step ---------------- */
+.ahr-next-step {
+	border-left: 3px solid var(--ahr-primary); background: var(--ahr-tint);
+	padding: 10px 14px; border-radius: 8px; margin-bottom: 14px; font-size: 13px;
+}
+.ahr-next-step.blocked { border-left-color: #b03030; background: #fbe7e7; }
+[data-theme="dark"] .ahr-next-step.blocked { background: rgba(220,48,48,.16); }
+
+/* ---------------- HR lifecycle ---------------- */
+.ahr-ready-sec-list { list-style: none; padding: 0; margin: 0; }
+.ahr-ready-sec-list li {
+	padding: 8px 10px; border: 1px solid var(--ahr-border); border-radius: 8px;
+	margin-bottom: 6px; font-size: 12.5px; display: grid;
+	grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center;
+}
+.ahr-ready-sec-list li .text-muted { grid-column: 1 / -1; }
+.ahr-badge.applied, .ahr-badge.settled, .ahr-badge.confirmed { background: #e3f8ec; color: #1f9254; border-color: #c2eed3; }
+.ahr-badge.recovering, .ahr-badge.disbursed { background: #e6f0fd; color: #1565c0; border-color: #c7defa; }
+.ahr-badge.expiring, .ahr-badge.review-due { background: #fff4e0; color: #d98300; border-color: #ffe2b3; }
+.ahr-badge.expired, .ahr-badge.overdue, .ahr-badge.failed { background: #fbe7e7; color: #b03030; border-color: #f1cccc; }
+.ahr-badge.renewed, .ahr-badge.in-progress { background: #eef2ff; color: #4338ca; border-color: #d5dbfa; }
+
+/* ---------------- Phase 4: bulk contracts, org chart, statutory ---------------- */
+
+/* An explanatory block, used wherever a screen has to state a limitation or a
+   definition rather than just show a number. */
+/* An informational callout (§16). Explanations, definitions and limitations are
+ * secondary to the figures they describe, so they are visually quieter than a
+ * section: no card, muted text, a single accent edge. */
+.ahr-note, .ahr-callout {
+	background: var(--ahr-tint); border: 1px solid var(--ahr-border);
+	border-left: 3px solid var(--ahr-primary); border-radius: var(--ahr-r-md);
+	padding: 12px 15px; font-size: 12.5px; line-height: 1.6; color: var(--ahr-muted);
+}
+.ahr-note b, .ahr-callout b, .ahr-note strong { color: var(--ahr-ink); font-weight: 700; }
+.ahr-callout.warn { border-left-color: #f59e0b; background: rgba(245, 158, 11, .07); }
+.ahr-callout.err { border-left-color: #ef4444; background: rgba(239, 68, 68, .06); }
+.ahr-callout.ok { border-left-color: #10b981; background: rgba(16, 185, 129, .07); }
+
+/* A collapsible explanation (§17). Long method notes should not permanently
+ * occupy the height of the table they describe — but nothing is collapsed that
+ * a reader needs in order to trust the number, so the summary always states
+ * what is inside. Built on <details>, so it works without JavaScript and keeps
+ * keyboard and screen-reader behaviour for free. */
+details.ahr-callout { padding: 0; }
+details.ahr-callout > summary {
+	list-style: none; cursor: pointer; padding: 11px 15px;
+	display: flex; align-items: center; gap: 9px;
+	font-size: 12.5px; font-weight: 700; color: var(--ahr-ink);
+}
+details.ahr-callout > summary::-webkit-details-marker { display: none; }
+details.ahr-callout > summary .ahr-callout-hint {
+	margin-left: auto; font-size: 11px; font-weight: 700; color: var(--ahr-primary);
+}
+details.ahr-callout > summary .fa-chevron-right { transition: transform .18s; font-size: 10px; color: var(--ahr-primary); }
+details.ahr-callout[open] > summary .fa-chevron-right { transform: rotate(90deg); }
+details.ahr-callout > .ahr-callout-body {
+	padding: 0 15px 13px 15px; font-size: 12.5px; line-height: 1.6; color: var(--ahr-muted);
+}
+details.ahr-callout > summary:hover { background: var(--ahr-tint-2); border-radius: var(--ahr-r-md); }
+
+.ahr-check {
+	display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px;
+	font-weight: 600; color: var(--ahr-ink); margin: 0 4px 0 0; white-space: nowrap;
+	padding: 6px 10px; border: 1px solid var(--ahr-border); border-radius: 9px;
+	background: var(--ahr-card); cursor: pointer;
+}
+.ahr-check input { margin: 0; }
+
+/* Organisation chart — an indented tree rather than a canvas drawing. It stays
+   readable at 200 people, prints, and needs no charting library. */
+/* (the old flat-list org chart lived here; replaced by the tree below) */
+
+/* ---------------- UX completion: help strips, empty states, quick actions ----
+ * The audit found screens that showed a number and a table and nothing else, so a
+ * user could not tell what the screen was for, why it was empty, or what to press.
+ * These three components exist to answer exactly that. */
+
+/* PAGE level: what this whole screen is for. Quieter than a section header —
+ * it is orientation, not content, so it sits above everything with no card. */
+.ahr-what {
+	display: flex; gap: 10px; align-items: flex-start;
+	background: transparent; border: none; border-radius: 0;
+	padding: 0 2px; margin-bottom: 16px; font-size: 12.5px; line-height: 1.55;
+	color: var(--ahr-muted);
+}
+.ahr-what i { margin-top: 2px; color: var(--ahr-primary); flex: 0 0 auto; }
+
+/* LEVEL 1 — the page bar. Rendered once per navigation for every screen, so
+ * the reader always knows which area they are in and which screen inside it.
+ * The tab shows the group; this names the screen. */
+.ahr-pagebar { flex: 0 0 auto; margin: 0 2px 14px; }
+.ahr-pagebar.hidden { display: none; }
+.ahr-pagebar-in { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ahr-crumb {
+	font-size: 11.5px; font-weight: 700; color: var(--ahr-muted);
+	text-transform: uppercase; letter-spacing: .5px;
+}
+.ahr-crumb-sep { font-size: 12px; color: var(--ahr-border-strong); }
+.ahr-pagebar-title {
+	margin: 0; font-size: 19px; font-weight: 800; letter-spacing: -.35px;
+	color: var(--ahr-ink); line-height: 1.25;
+	display: inline-flex; align-items: center; gap: 9px;
+}
+.ahr-pagebar-title i { font-size: 15px; color: var(--ahr-primary); }
+@media (max-width: 700px) {
+	.ahr-pagebar-title { font-size: 17px; }
+	.ahr-pagebar { margin-bottom: 10px; }
+}
+
+/* PAGE title: the name of the area, above its sections. Used where the screen
+ * benefits from a heading of its own rather than relying on the active tab. */
+.ahr-pagehead { margin: 2px 2px 16px; }
+.ahr-pagehead h2 {
+	margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.35px;
+	color: var(--ahr-ink); line-height: 1.25;
+}
+.ahr-pagehead .ahr-pagehead-sub {
+	margin-top: 4px; font-size: 12.5px; color: var(--ahr-muted); line-height: 1.5;
+}
+.ahr-pagehead-row { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.ahr-pagehead-row .ahr-pagehead { flex: 1 1 260px; margin-bottom: 16px; }
+.ahr-pagehead-actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.ahr-pagehead-actions .btn { border-radius: var(--ahr-r-sm); }
+@media (max-width: 700px) {
+	/* Title, then description, then the actions on their own line (§41). */
+	.ahr-pagehead-row { flex-direction: column; }
+	.ahr-pagehead-actions { width: 100%; }
+}
+
+/* A group label above a run of related sections (§50): the level between the
+ * page and a section, used to say "these three belong together". */
+.ahr-group-label {
+	display: flex; align-items: center; gap: 10px;
+	margin: 4px 2px 12px; font-size: 10.5px; font-weight: 800;
+	letter-spacing: 1.1px; text-transform: uppercase; color: var(--ahr-muted);
+}
+.ahr-group-label::after {
+	content: ""; flex: 1 1 auto; height: 1px; background: var(--ahr-border);
+}
+
+/* The site's star watermark is painted by the desk on body::before, fixed and
+ * ABOVE the page (z-index 1), so it fell across table rows and made figures
+ * harder to read. Pushed behind the content on this route only — the branding
+ * still shows in the page gutters, but nothing reads through a column of
+ * numbers. Scoped to the class this page already puts on <body> and removes
+ * when you navigate away, so the rest of the desk is untouched. */
+body.ahr-fullscreen::before { z-index: -1; opacity: .05; }
+
+/* An empty state is a call to action, not an apology (§18). */
+.ahr-blank, .ahr-empty-state {
+	text-align: center; padding: 38px 24px; background: var(--ahr-bg);
+	border: 1px dashed var(--ahr-border-strong); border-radius: var(--ahr-r-md);
+	margin-bottom: 14px;
+}
+.ahr-blank > i, .ahr-empty-state > i {
+	display: flex; align-items: center; justify-content: center;
+	width: 46px; height: 46px; margin: 0 auto 14px; border-radius: 50%;
+	background: var(--ahr-tint-2); color: var(--ahr-primary); font-size: 19px; opacity: 1;
+}
+/* The small in-table version: a list that came back with nothing still has to
+ * say what would put something in it (§18). "No records" said none of that. */
+.ahr-empty-state.compact { padding: 26px 20px; }
+.ahr-empty-state.compact > i { width: 38px; height: 38px; font-size: 16px; margin-bottom: 11px; }
+.ahr-empty-state.compact h4 { font-size: 13.5px; }
+.ahr-empty-state.compact p { font-size: 12.5px; }
+.ahr-blank h4, .ahr-empty-state h4 { font-size: 15px; font-weight: 800; margin: 0 0 8px; color: var(--ahr-ink); }
+.ahr-blank p, .ahr-empty-state p { font-size: 13px; color: var(--ahr-muted); margin: 0 auto 8px;
+	max-width: 620px; line-height: 1.6; }
+.ahr-blank p.who, .ahr-empty-state p.who { font-size: 12px; font-style: italic; }
+.ahr-blank-actions, .ahr-empty-state-actions { margin-top: 16px; display: flex; gap: 8px; justify-content: center;
+	flex-wrap: wrap; }
+
+.ahr-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* Quick actions from an employee record to what you actually do to them. */
+.ahr-xlinks { float: left; display: flex; gap: 6px; flex-wrap: wrap; }
+@media (max-width: 767px) {
+	.ahr-xlinks { float: none; margin-bottom: 10px; }
+	.ahr-blank { padding: 28px 16px; }
+}
+
+/* ===================================================================
+ * HR-OPERATED MODE
+ *
+ * The product is run by the HR department on behalf of employees and line
+ * managers, who are not required to have a login. Two components follow from
+ * that: a quick-action menu so starting any routine job never requires knowing
+ * which screen owns it, and an action queue so the console opens on "what needs
+ * doing today" rather than on a set of counters.
+ * =================================================================== */
+
+/* Quick actions (§29) — always reachable, from every screen. */
+.ahr-quick-wrap { position: relative; }
+.ahr-quick-btn { white-space: nowrap; }
+.ahr-quick-menu {
+	display: none; position: absolute; right: 0; top: calc(100% + 6px); z-index: 1010;
+	min-width: 250px; background: var(--ahr-card); border: 1px solid var(--ahr-border-strong);
+	border-radius: 12px; box-shadow: 0 12px 32px rgba(15, 23, 42, .16); padding: 6px;
+	max-height: 70vh; overflow-y: auto;
+}
+.ahr-quick-wrap.open .ahr-quick-menu { display: block; }
+.ahr-quick-item {
+	display: flex; align-items: center; gap: 10px; padding: 9px 11px; border-radius: 8px;
+	font-size: 13px; color: var(--ahr-ink); cursor: pointer; white-space: nowrap;
+}
+.ahr-quick-item:hover { background: var(--ahr-tint); color: var(--ahr-primary); }
+.ahr-quick-item i { width: 16px; text-align: center; opacity: .7; }
+
+/* The action queue (§28). Each row is a count, what it means, and the screen that
+ * clears it — a number you cannot act on belongs in a report, not on a console. */
+.ahr-queue { display: flex; flex-direction: column; gap: 6px; }
+.ahr-queue-row {
+	display: grid; grid-template-columns: 56px 1fr auto 16px; align-items: center;
+	gap: 12px; width: 100%; text-align: left; padding: 10px 12px;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border);
+	border-radius: 10px; cursor: pointer; transition: border-color .12s, background .12s;
+}
+.ahr-queue-row:hover { border-color: var(--ahr-primary); background: var(--ahr-tint); }
+.ahr-queue-row .n {
+	font-size: 19px; font-weight: 800; color: var(--ahr-primary); text-align: center;
+	font-variant-numeric: tabular-nums;
+}
+.ahr-queue-row .l { font-size: 13px; font-weight: 600; color: var(--ahr-ink); }
+.ahr-queue-row .h { font-size: 11.5px; color: var(--ahr-muted); text-align: right;
+	max-width: 46ch; }
+.ahr-queue-row > i { color: var(--ahr-muted); }
+
+@media (max-width: 767px) {
+	/* The hint is the first thing to go: the count and the label still say what to do. */
+	.ahr-queue-row { grid-template-columns: 44px 1fr 16px; }
+	.ahr-queue-row .h { display: none; }
+	.ahr-quick-menu { right: auto; left: 0; min-width: 220px; }
+}
+
+/* ===================================================================
+ * PART 1 — THE SCREEN STAYS PUT, THE ROWS SCROLL
+ *
+ * There are two kinds of screen here and they must NOT scroll alike.
+ *
+ * DATA SCREEN — one primary dataset (Employees, Bulk Contracts, Salary
+ * Slips). Context (title, help, filters, actions) then a long table.
+ * Scrolling the window pushed the filters and the Preview button off the
+ * top, so changing a filter after looking at row 60 meant scrolling all the
+ * way back up. These screens are bounded to the viewport and only the rows
+ * move:
+ *
+ *   .ahr-shell.ahr-data-screen   bounded height, flex column
+ *     .ahr-bar                   fixed
+ *     .ahr-content               flex: 1
+ *       ...context...            fixed
+ *       .ahr-tablewrap           flex: 1 — THIS is what scrolls
+ *         thead th               sticky
+ *
+ * DASHBOARD SCREEN — several independent sections (Insights, HR Dashboard,
+ * Payroll). These are left in ordinary document flow and the PAGE scrolls.
+ * Nothing here may take a height from the viewport: one section doing that
+ * starves every section below it, which is precisely what went wrong when
+ * this layout was applied to every screen that happened to contain a table.
+ *
+ * CANVAS SCREEN — the org chart, which pans inside its own viewport.
+ *
+ * Which screen is which is declared in the JS (SCREEN_LAYOUT), never
+ * inferred here. Height comes from the viewport, never from a magic pixel
+ * number: the JS measures where the shell starts and publishes
+ * --ahr-shell-top, so a 768px laptop and a 1080px monitor each use exactly
+ * what they have.
+ * =================================================================== */
+
+/* ---- DASHBOARD (also the default before a mode is known) ---------- */
+.ahr-shell.ahr-dashboard-screen { display: block; height: auto; overflow: visible; }
+.ahr-shell.ahr-dashboard-screen > .ahr-content {
+	height: auto; min-height: 0; overflow: visible;
+}
+/* The page scrolls here, so the bar earns its sticky position back. */
+.ahr-shell.ahr-dashboard-screen > .ahr-bar { position: sticky; top: 10px; }
+.ahr-shell.ahr-maximized.ahr-dashboard-screen { height: 100vh; overflow: auto; }
+
+/* ---- BOARD: a fixed set of tiles, sized to the window -------------
+ *
+ * The Overview is four figures and three charts — something you look at, not
+ * something you read down. It is bounded to the viewport and the two chart
+ * rows share whatever height is left, so nothing scrolls.
+ *
+ * This works only because the content is a KNOWN set of panels. A screen whose
+ * sections grow with the data must not use it: the tiles would shrink as the
+ * data arrived. The chart heights are measured in the JS and handed to
+ * frappe-charts, which draws its SVG at a fixed pixel height rather than
+ * filling its container.
+ * ------------------------------------------------------------------- */
+.ahr-shell.ahr-board-screen {
+	display: flex; flex-direction: column;
+	height: calc(100vh - var(--ahr-shell-top, 90px) - 10px);
+	min-height: 420px;
+	overflow: hidden;
+}
+.ahr-shell.ahr-board-screen > .ahr-bar { position: relative; top: 0; flex: 0 0 auto; }
+.ahr-shell.ahr-board-screen > .ahr-content {
+	flex: 1 1 auto; min-height: 0;
+	display: flex; flex-direction: column;
+	/* auto, not hidden: on a very short window the tiles hit their floor and the
+	 * board scrolls rather than losing its bottom row. */
+	overflow-y: auto; overflow-x: hidden;
+}
+.ahr-board-screen > .ahr-content > .ahr-cards,
+.ahr-board-screen > .ahr-content > .ahr-metrics { flex: 0 0 auto; margin-bottom: 14px; }
+/* On the board the metric strip is a full-width header band rather than a few
+ * figures above a list, so the cap that keeps three metrics from stretching
+ * across a wide screen is lifted here. */
+.ahr-board-screen > .ahr-content > .ahr-cards > .ahr-card,
+.ahr-board-screen > .ahr-content > .ahr-metrics > .ahr-metric { max-width: none; }
+.ahr-board-screen > .ahr-content > .ahr-chart-grid {
+	flex: 1 1 0; min-height: 190px; margin-bottom: 14px;
+}
+.ahr-board-screen > .ahr-content > .ahr-chart-grid:last-child { margin-bottom: 0; }
+.ahr-board-screen .ahr-chart-grid > .ahr-panel {
+	display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+}
+.ahr-board-screen .ahr-chart-grid > .ahr-panel > h5 { flex: 0 0 auto; }
+/* Overrides the 220px floor a chart carries in ordinary flow. */
+.ahr-board-screen .ahr-chart { flex: 1 1 auto; min-height: 0; }
+/* On a short screen the board's fixed furniture — page bar, metric strip, three
+ * section headers — was leaving the charts about 120px tall, which is a chart
+ * nobody can read. The furniture gives the height back: the supporting line
+ * under each figure goes, the tiles get tighter, and the charts grow again.
+ * Nothing is hidden that carries information the figure does not already. */
+@media (min-width: 901px) and (max-height: 850px) {
+	.ahr-board-screen .ahr-metric-foot { display: none; }
+	.ahr-board-screen .ahr-card, .ahr-board-screen .ahr-metric { padding: 11px 15px; }
+	.ahr-board-screen .ahr-metric-head { margin-bottom: 5px; }
+	.ahr-board-screen .ahr-card .val,
+	.ahr-board-screen .ahr-metric-value { font-size: 23px; }
+	.ahr-board-screen .ahr-pagebar { margin-bottom: 9px; }
+	.ahr-board-screen .ahr-panel { padding: 13px 16px; }
+	.ahr-board-screen .ahr-section-head { padding-bottom: 9px; margin-bottom: 10px; }
+	.ahr-board-screen .ahr-section-sub { display: none; }
+	.ahr-board-screen > .ahr-content > .ahr-cards,
+	.ahr-board-screen > .ahr-content > .ahr-metrics { margin-bottom: 10px; }
+	.ahr-board-screen > .ahr-content > .ahr-chart-grid { margin-bottom: 10px; }
+}
+
+/* The one list on the board. It is the only part whose length is unknown, so it
+ * gets the scrollbar instead of the page. */
+.ahr-board-screen .ahr-holidays,
+.ahr-board-screen .ahr-chart-grid > .ahr-panel > .ahr-empty {
+	flex: 1 1 auto; min-height: 0; overflow-y: auto;
+}
+
+/* ---- DATA / CANVAS: bounded to the viewport ----------------------- */
+.ahr-shell.ahr-data-screen,
+.ahr-shell.ahr-canvas-screen {
+	display: flex; flex-direction: column;
+	height: calc(100vh - var(--ahr-shell-top, 90px) - 10px);
+	min-height: 420px;                 /* never collapse to nothing */
+	overflow: hidden;
+}
+/* The bar does not need to be sticky here — the shell does not scroll. */
+.ahr-shell.ahr-data-screen > .ahr-bar,
+.ahr-shell.ahr-canvas-screen > .ahr-bar { position: relative; top: 0; flex: 0 0 auto; }
+.ahr-shell.ahr-data-screen > .ahr-content,
+.ahr-shell.ahr-canvas-screen > .ahr-content {
+	flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+	padding-right: 2px;                /* room for the scrollbar, no jump */
+}
+.ahr-shell.ahr-maximized.ahr-data-screen,
+.ahr-shell.ahr-maximized.ahr-canvas-screen {
+	height: 100vh; padding: 12px 18px; overflow: hidden;
+}
+
+/* On a short screen a data screen's furniture — page bar, help strip, filter
+ * bar, metric strip — was leaving four rows of an eighty-row list visible. The
+ * furniture gives height back to the rows, which are what the screen is for.
+ * Same trade as the board: nothing that carries information is removed, only
+ * the supporting line under each figure and some breathing room. */
+@media (min-width: 901px) and (max-height: 820px) {
+	.ahr-data-screen .ahr-metric-foot { display: none; }
+	.ahr-data-screen .ahr-metric, .ahr-data-screen .ahr-card { padding: 10px 14px; }
+	.ahr-data-screen .ahr-metric-head { margin-bottom: 4px; }
+	.ahr-data-screen .ahr-metric-value, .ahr-data-screen .ahr-card .val { font-size: 22px; }
+	.ahr-data-screen .ahr-pagebar { margin-bottom: 9px; }
+	.ahr-data-screen .ahr-what { margin-bottom: 10px; }
+	.ahr-data-screen .ahr-metrics, .ahr-data-screen .ahr-cards { margin-bottom: 12px; }
+	.ahr-data-screen .ahr-filters { margin-bottom: 12px; padding: 10px 14px 11px; }
+}
+
+/* A data screen whose list has taken over the scrolling.
+ *
+ * overflow-y is auto, not hidden. In the ordinary case the flex children add
+ * up to exactly the available height and no scrollbar appears. In the awkward
+ * case — a tall filter stack, a small screen, a summary panel under the list —
+ * the screen scrolls instead of silently clipping. Content that cannot be
+ * reached is a worse failure than a second scrollbar. */
+.ahr-data-screen > .ahr-content.ahr-fit { overflow-y: auto; display: flex; flex-direction: column; }
+.ahr-data-screen > .ahr-content.ahr-fit > * { flex: 0 0 auto; }
+/* The scroll region is rarely a direct child of the panel — a view may have put
+ * the table inside its own list container. So the flex chain is marked on every
+ * element from the panel down to the wrapper, rather than assumed. Without this
+ * the height stops propagating at the first unmarked ancestor and the table
+ * simply grows to its natural size again. */
+.ahr-data-screen > .ahr-content.ahr-fit > .ahr-panel.ahr-fit-panel {
+	flex: 1 1 auto; min-height: 300px; display: flex; flex-direction: column;
+	overflow: hidden;
+}
+.ahr-data-screen > .ahr-content.ahr-fit > .ahr-panel.ahr-fit-panel:last-child {
+	margin-bottom: 0;
+}
+.ahr-fit-panel > * { flex: 0 0 auto; }
+.ahr-fit-chain {
+	flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column;
+	overflow: hidden;
+}
+.ahr-fit-chain > * { flex: 0 0 auto; }
+
+/* THE scroll region. Also the horizontal scroller (§5): a wide table scrolls
+ * inside its own box instead of dragging the whole application sideways. */
+.ahr-tablewrap {
+	overflow: auto; -webkit-overflow-scrolling: touch;
+	border: 1px solid var(--ahr-border); border-radius: 10px;
+	background: var(--ahr-card);
+}
+.ahr-fit-panel .ahr-tablewrap.ahr-fit-scroll,
+.ahr-fit-chain > .ahr-tablewrap.ahr-fit-scroll { flex: 1 1 auto; min-height: 240px; }
+.ahr-tablewrap > .ahr-table { margin: 0; }
+.ahr-tablewrap > .ahr-table th:first-child,
+.ahr-tablewrap > .ahr-table td:first-child { padding-left: 14px; }
+
+/* Sticky column headers — only inside a scroll region, so a table that is not
+ * scrolling internally keeps its ordinary header and does not stick to the
+ * page. A solid background is what stops rows showing through (§4). */
+.ahr-tablewrap > .ahr-table thead th {
+	position: sticky; top: 0; z-index: 3;
+	background: var(--ahr-card);
+	box-shadow: inset 0 -2px 0 var(--ahr-border-strong);
+	border-bottom: none;
+}
+/* The header used to need a second opaque layer because striped rows showed
+ * through it while scrolling. The stripes are gone, and --ahr-card is opaque,
+ * so the extra layer went with them. */
+
+/* A short table should look intentional, not like a huge empty box (§13). */
+.ahr-tablewrap.ahr-tablewrap-short { flex: 0 1 auto; min-height: 0; }
+
+/* A long table inside a DASHBOARD section (§6).
+ *
+ * Bounded by a fraction of the viewport, never by "whatever height is left".
+ * The section must stay one section among several: the reader scrolls the page
+ * past it, and only reaches for this inner scrollbar if they want to read all
+ * 200 rows. Short tables never get this class at all, so the twelve-month
+ * headcount table simply shows its twelve rows (§5, §12, §21). */
+.ahr-dashboard-screen .ahr-tablewrap.ahr-dashboard-table {
+	max-height: min(420px, 50vh);
+	overflow: auto;
+}
+
+/* Anything pinned under the rows — a total, a count, pagination (§8). */
+.ahr-fit-foot {
+	flex: 0 0 auto; padding: 9px 4px 0; font-size: 12px; color: var(--ahr-muted);
+	border-top: 1px solid var(--ahr-border); margin-top: 8px;
+}
+
+@media (max-width: 900px) {
+	/* Same principle, but the context block gets its own small scroll so a tall
+	 * filter stack can never squeeze the rows down to a single line (§12). */
+	.ahr-shell.ahr-data-screen,
+	.ahr-shell.ahr-canvas-screen { height: calc(100vh - var(--ahr-shell-top, 70px) - 6px); }
+	/* A board reverts to ordinary page scrolling on a phone. Four figures, three
+	 * charts and a holiday list compressed into 844px would leave every one of them
+	 * too small to read, and a chart nobody can read is worse than one they scroll
+	 * to. Kept in step with boardIsFitted() in the JS, which uses the same 900px. */
+	.ahr-shell.ahr-board-screen { display: block; height: auto; overflow: visible; }
+	.ahr-shell.ahr-board-screen > .ahr-content {
+		display: block; height: auto; min-height: 0; overflow: visible;
+	}
+	.ahr-shell.ahr-board-screen > .ahr-bar { position: sticky; top: 10px; }
+	.ahr-board-screen .ahr-chart { min-height: 220px; }
+	.ahr-board-screen .ahr-holidays { overflow-y: visible; }
+	.ahr-fit-panel > .ahr-tablewrap { min-height: 260px; }
+	/* On a phone a dashboard is a single column the thumb scrolls through.
+	 * A nested vertical scroll window inside each analytics panel would be
+	 * almost impossible to use, so the bound is dropped and the page simply
+	 * gets longer (§23). Sideways scrolling for wide columns stays. */
+	.ahr-dashboard-screen .ahr-tablewrap.ahr-dashboard-table { max-height: none; }
+}
+
+/* ===================================================================
+ * PART 2 — ORGANISATION CHART
+ *
+ * The old chart was an indented list of one-line rows: correct, and
+ * unreadable as a structure. This is a real top-down tree of employee
+ * cards, with connectors drawn in pure CSS.
+ *
+ * NO CHARTING LIBRARY. The connectors are ::before/::after borders on the
+ * list items — the long-established technique — and zoom is a single CSS
+ * transform. A dependency would have added ~100KB and a second styling
+ * language for something the browser already does.
+ *
+ * The chart opts OUT of the table-scroll layout (.ahr-no-fit): it has its
+ * own viewport, which pans and zooms.
+ * =================================================================== */
+
+.ahr-org-wrap {
+	display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto;
+	gap: 12px;
+}
+
+/* ---- Summary header ---- */
+.ahr-org-head {
+	display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border);
+	border-top: 3px solid var(--ahr-primary);
+	border-radius: 14px; padding: 12px 16px; box-shadow: var(--ahr-shadow);
+}
+.ahr-org-title { display: flex; flex-direction: column; line-height: 1.2; margin-right: 4px; }
+.ahr-org-title .t {
+	font-size: 10px; font-weight: 800; letter-spacing: .8px; text-transform: uppercase;
+	color: var(--ahr-primary);
+}
+.ahr-org-title .s { font-size: 13px; font-weight: 700; color: var(--ahr-ink); }
+.ahr-org-stats { display: flex; gap: 20px; flex-wrap: wrap; }
+.ahr-org-stat { display: flex; flex-direction: column; line-height: 1.15; }
+.ahr-org-stat .n { font-size: 19px; font-weight: 800; color: var(--ahr-ink); font-variant-numeric: tabular-nums; }
+.ahr-org-stat .l { font-size: 10.5px; color: var(--ahr-muted); text-transform: uppercase; letter-spacing: .5px; font-weight: 700; }
+.ahr-org-stat.warn .n { color: #b45309; }
+.ahr-org-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+.ahr-org-search {
+	position: relative; display: flex; align-items: center;
+}
+.ahr-org-search i {
+	position: absolute; left: 11px; color: var(--ahr-muted); font-size: 12px; pointer-events: none;
+}
+.ahr-org-search input {
+	width: 230px; padding: 7px 11px 7px 30px; font-size: 13px;
+	border: 1px solid var(--ahr-border-strong); border-radius: 9px;
+	background: var(--ahr-card); color: var(--ahr-ink);
+}
+.ahr-org-search input:focus { outline: none; border-color: var(--ahr-primary); box-shadow: 0 0 0 3px var(--ahr-tint-2); }
+.ahr-org-tools select {
+	padding: 7px 10px; font-size: 13px; border-radius: 9px; max-width: 210px;
+	border: 1px solid var(--ahr-border-strong); background: var(--ahr-card); color: var(--ahr-ink);
+}
+.ahr-org-btns { display: flex; gap: 4px; }
+.ahr-org-btns .btn { border-radius: 9px; }
+
+/* ---- Structure issues ---- */
+.ahr-org-issues {
+	display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+	background: #fffbeb; border: 1px solid #fde68a; border-radius: 12px; padding: 9px 14px;
+	font-size: 12.5px; color: #92400e;
+}
+[data-theme="dark"] .ahr-org-issues { background: rgba(180, 83, 9, .14); border-color: rgba(180, 83, 9, .4); color: #fcd34d; }
+.ahr-org-issues b { font-weight: 800; }
+.ahr-org-issue {
+	display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+	background: rgba(255,255,255,.75); border: 1px solid #fcd34d; border-radius: 20px;
+	padding: 3px 11px; font-weight: 600; color: inherit;
+}
+[data-theme="dark"] .ahr-org-issue { background: rgba(0,0,0,.2); }
+.ahr-org-issue:hover { border-color: #d97706; }
+.ahr-org-issue.active { background: #d97706; border-color: #d97706; color: #fff; }
+
+/* ---- The viewport: pans and zooms ---- */
+.ahr-org-body { display: flex; gap: 12px; flex: 1 1 auto; min-height: 0; }
+.ahr-org-canvas {
+	flex: 1 1 auto; min-width: 0; min-height: 0; overflow: auto; position: relative;
+	background:
+		radial-gradient(circle at 1px 1px, var(--ahr-border) 1px, transparent 0) 0 0 / 22px 22px,
+		var(--ahr-bg);
+	border: 1px solid var(--ahr-border); border-radius: 14px;
+	cursor: grab;
+}
+.ahr-org-canvas.dragging { cursor: grabbing; user-select: none; }
+.ahr-org-stage {
+	transform-origin: 0 0; padding: 28px 34px 40px;
+	display: inline-block; min-width: 100%;
+	transition: transform .18s ease;
+}
+.ahr-org-canvas.dragging .ahr-org-stage { transition: none; }
+
+/* ---- Tree connectors (pure CSS) ---- */
+.ahr-tree, .ahr-tree ul { list-style: none; margin: 0; padding: 0; }
+.ahr-tree { display: flex; justify-content: center; }
+.ahr-tree ul { display: flex; justify-content: center; padding-top: 34px; position: relative; }
+.ahr-tree li {
+	position: relative; padding: 34px 10px 0;
+	display: flex; flex-direction: column; align-items: center;
+}
+/* The elbow above each child: half a horizontal rule, plus a vertical drop. */
+.ahr-tree li::before, .ahr-tree li::after {
+	content: ""; position: absolute; top: 0; right: 50%;
+	border-top: 2px solid var(--ahr-border-strong); width: 50%; height: 34px;
+}
+.ahr-tree li::after { right: auto; left: 50%; border-left: 2px solid var(--ahr-border-strong); }
+.ahr-tree li:only-child::after, .ahr-tree li:only-child::before { display: none; }
+.ahr-tree li:only-child { padding-top: 34px; }
+.ahr-tree li:first-child::before, .ahr-tree li:last-child::after { border: 0 none; }
+.ahr-tree li:last-child::before { border-right: 2px solid var(--ahr-border-strong); border-radius: 0 7px 0 0; }
+.ahr-tree li:first-child::after { border-radius: 7px 0 0 0; }
+/* The stem from a parent down to its children's rule. */
+.ahr-tree ul::before {
+	content: ""; position: absolute; top: 0; left: 50%;
+	border-left: 2px solid var(--ahr-border-strong); width: 0; height: 34px;
+}
+.ahr-tree li.collapsed > ul { display: none; }
+.ahr-tree > li { padding-top: 0; }
+.ahr-tree > li::before, .ahr-tree > li::after { display: none; }
+
+/* ---- The employee card ---- */
+.ahr-node {
+	position: relative; z-index: 1; width: 212px; background: var(--ahr-card);
+	border: 1px solid var(--ahr-border); border-radius: 14px;
+	padding: 14px 14px 12px; text-align: center; cursor: pointer;
+	box-shadow: 0 1px 3px rgba(15,23,42,.05);
+	transition: box-shadow .16s, border-color .16s, transform .16s;
+}
+.ahr-node:hover { border-color: var(--ahr-accent); box-shadow: var(--ahr-shadow-lg); transform: translateY(-2px); }
+.ahr-node:focus-visible { outline: 2px solid var(--ahr-primary); outline-offset: 2px; }
+.ahr-node.is-selected { border-color: var(--ahr-primary); box-shadow: 0 0 0 3px var(--ahr-tint-2); }
+.ahr-node.is-match { border-color: #d97706; box-shadow: 0 0 0 3px rgba(217,119,6,.22); }
+.ahr-node.is-dim { opacity: .38; }
+/* A thin accent bar, tinted per department but kept quiet — a recognisable
+ * marker, not a rainbow (§28). */
+.ahr-node::before {
+	content: ""; position: absolute; left: 14px; right: 14px; top: 0; height: 3px;
+	border-radius: 0 0 3px 3px; background: var(--ahr-dept, var(--ahr-primary)); opacity: .85;
+}
+.ahr-node-av {
+	width: 52px; height: 52px; border-radius: 50%; margin: 4px auto 9px;
+	display: flex; align-items: center; justify-content: center;
+	font-size: 16px; font-weight: 800; letter-spacing: .5px; color: #fff;
+	background: var(--ahr-grad); overflow: hidden; flex: 0 0 auto;
+	box-shadow: 0 3px 8px rgba(37,99,235,.22);
+}
+.ahr-node-av img { width: 100%; height: 100%; object-fit: cover; }
+.ahr-node-name {
+	font-size: 13px; font-weight: 700; color: var(--ahr-ink); line-height: 1.3;
+	overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.ahr-node-role {
+	font-size: 11.5px; color: var(--ahr-primary); font-weight: 600; margin-top: 3px;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ahr-node-dept {
+	display: inline-block; margin-top: 8px; max-width: 100%;
+	font-size: 10px; font-weight: 700; letter-spacing: .3px; text-transform: uppercase;
+	color: var(--ahr-muted); background: var(--ahr-bg);
+	border: 1px solid var(--ahr-border); border-radius: 20px; padding: 2px 9px;
+	white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ahr-node-flags { display: flex; gap: 4px; justify-content: center; flex-wrap: wrap; margin-top: 7px; }
+.ahr-node-flag {
+	font-size: 9.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px;
+	border-radius: 20px; padding: 2px 8px;
+	background: rgba(217,119,6,.12); color: #b45309; border: 1px solid rgba(217,119,6,.3);
+}
+/* The expand / collapse control, straddling the bottom edge. */
+.ahr-node-toggle {
+	position: absolute; left: 50%; bottom: -13px; transform: translateX(-50%);
+	display: inline-flex; align-items: center; gap: 5px;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border-strong);
+	color: var(--ahr-primary); border-radius: 20px; padding: 3px 10px;
+	font-size: 10.5px; font-weight: 800; cursor: pointer; white-space: nowrap;
+	box-shadow: 0 2px 6px rgba(15,23,42,.08); z-index: 2; transition: all .15s;
+}
+.ahr-node-toggle:hover { background: var(--ahr-primary); color: #fff; border-color: var(--ahr-primary); }
+.ahr-node-toggle:focus-visible { outline: 2px solid var(--ahr-primary); outline-offset: 2px; }
+.ahr-node-toggle i { font-size: 9px; transition: transform .18s; }
+li.collapsed > .ahr-node .ahr-node-toggle i { transform: rotate(-90deg); }
+
+/* ---- Top-level group: roots with nobody reporting to them ---- */
+.ahr-org-group { margin-top: 26px; }
+.ahr-org-group-head {
+	display: flex; align-items: center; gap: 9px; margin: 0 0 14px;
+	font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .7px;
+	color: var(--ahr-muted);
+}
+.ahr-org-group-head::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--ahr-border); }
+.ahr-org-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+.ahr-org-grid .ahr-node { width: 196px; }
+
+/* ---- Detail side panel ---- */
+.ahr-org-side {
+	flex: 0 0 320px; min-height: 0; overflow-y: auto;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border);
+	border-radius: 14px; padding: 18px; box-shadow: var(--ahr-shadow);
+}
+.ahr-org-side.hidden { display: none; }
+.ahr-org-side-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+.ahr-org-side-head .ahr-node-av { margin: 0; width: 48px; height: 48px; }
+.ahr-org-side-close {
+	margin-left: auto; background: none; border: none; color: var(--ahr-muted);
+	font-size: 15px; cursor: pointer; padding: 2px 6px; border-radius: 6px;
+}
+.ahr-org-side-close:hover { background: var(--ahr-bg); color: var(--ahr-ink); }
+.ahr-org-side dl { margin: 0; font-size: 12.5px; }
+.ahr-org-side dt {
+	font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+	color: var(--ahr-muted); font-weight: 700; margin-top: 11px;
+}
+.ahr-org-side dd { margin: 2px 0 0; color: var(--ahr-ink); font-weight: 600; }
+.ahr-org-side-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 18px; }
+.ahr-org-side-actions .btn { border-radius: 9px; text-align: left; }
+
+/* ---- Zoom control ---- */
+.ahr-org-zoom {
+	position: absolute; right: 14px; bottom: 14px; z-index: 5;
+	display: flex; align-items: center; gap: 2px;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border-strong);
+	border-radius: 11px; padding: 3px; box-shadow: var(--ahr-shadow);
+}
+.ahr-org-zoom button {
+	border: none; background: none; color: var(--ahr-ink); width: 30px; height: 28px;
+	border-radius: 8px; cursor: pointer; font-size: 12px;
+}
+.ahr-org-zoom button:hover { background: var(--ahr-tint); color: var(--ahr-primary); }
+.ahr-org-zoom .lvl {
+	font-size: 11px; font-weight: 700; color: var(--ahr-muted); min-width: 42px;
+	text-align: center; font-variant-numeric: tabular-nums;
+}
+
+/* ---- Responsive (§39) ----
+ * Below 900px the tree stops being a tree: side-by-side cards at 196px wide
+ * cannot fit, and shrinking them makes the text unreadable. The same data
+ * becomes a nested, indented list of the same cards — still the real
+ * hierarchy, still collapsible, but navigable with one thumb. */
+@media (max-width: 900px) {
+	.ahr-org-body { flex-direction: column; }
+	.ahr-org-side { flex: 0 0 auto; max-height: 46%; }
+	.ahr-org-head { padding: 10px 12px; gap: 10px; }
+	.ahr-org-search input { width: 100%; }
+	.ahr-org-tools { margin-left: 0; width: 100%; }
+	.ahr-org-tools select { flex: 1 1 auto; max-width: none; }
+
+	.ahr-tree, .ahr-tree ul { display: block; }
+	.ahr-tree ul { padding-top: 0; padding-left: 20px; }
+	.ahr-tree ul::before { display: none; }
+	.ahr-tree li { display: block; padding: 6px 0 0 12px; align-items: stretch; }
+	.ahr-tree li::before {
+		width: 12px; height: 50%; top: 0; left: -1px; right: auto;
+		border-top: none; border-left: 2px solid var(--ahr-border-strong);
+		border-bottom: 2px solid var(--ahr-border-strong); border-radius: 0 0 0 8px;
+	}
+	.ahr-tree li::after { display: none; }
+	.ahr-tree li:last-child::before { border-radius: 0 0 0 8px; border-right: none; }
+	.ahr-tree > li { padding-left: 0; }
+	.ahr-node { width: auto; text-align: left; display: flex; gap: 11px; align-items: center; padding: 11px 12px; }
+	.ahr-node::before { left: 0; top: 0; bottom: 0; right: auto; width: 3px; height: auto; border-radius: 0 3px 3px 0; }
+	.ahr-node-av { margin: 0; width: 40px; height: 40px; font-size: 13px; }
+	.ahr-node-body { min-width: 0; flex: 1 1 auto; }
+	.ahr-node-toggle {
+		position: static; transform: none; margin-left: auto; flex: 0 0 auto;
+	}
+	.ahr-org-grid .ahr-node { width: 100%; }
+	.ahr-org-stage { padding: 14px 12px 26px; }
+}
+
+/* Each independent reporting line is its own block. Stacked without a break,
+ * the second tree read as though it hung off the first. */
+.ahr-org-branch { padding-bottom: 8px; margin-bottom: 26px; }
+.ahr-org-branch + .ahr-org-branch { border-top: 1px dashed var(--ahr-border-strong); padding-top: 22px; }
+.ahr-org-branch > .ahr-org-group-head { justify-content: flex-start; }
+@media (max-width: 900px) { .ahr-org-branch { margin-bottom: 18px; } }
+
+/* ---- Mobile: give the data the screen ------------------------------------
+ * At 390px the navigation wrapped onto six rows and the org header took the
+ * rest, so the first employee card sat below the fold on a screen whose whole
+ * purpose is the chart. Nothing is removed — the same controls are all there,
+ * just laid out to take one line each instead of six. */
+@media (max-width: 760px) {
+	/* Tabs scroll sideways rather than stacking. One row, swipe to reach the rest. */
+	/* TWO rows, not six: the tools on one, the tabs on the other as a horizontal
+	 * scroller. They must not share a row — a scroller sliding underneath a fixed
+	 * neighbour puts the tabs behind it, and the neighbour then swallows their clicks. */
+	.ahr-bar { gap: 8px; padding: 8px 10px; margin-bottom: 12px; flex-wrap: wrap; }
+	/* The brand is decoration, and on a phone it is decoration that costs a row. */
+	.ahr-brand { display: none; }
+	.ahr-bar-tools { order: 1; flex: 1 1 100%; justify-content: space-between; }
+	.ahr-bar-tools .ahr-company { min-width: 0; flex: 1 1 auto; }
+	.ahr-tabs {
+		order: 2; flex: 1 1 100%;
+		flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
+		-webkit-overflow-scrolling: touch; scrollbar-width: none;
+		padding-bottom: 2px;
+	}
+	.ahr-tabs::-webkit-scrollbar { display: none; }
+	.ahr-tab { flex: 0 0 auto; }
+	/* The dropdown belongs to a tab inside a horizontal scroller, so it has to escape
+	 * it — otherwise the menu is clipped by the scroller's own overflow. */
+	.ahr-tab-wrap.open .ahr-dd-menu { position: fixed; left: 10px; right: 10px; top: auto; }
+}
+
+@media (max-width: 900px) {
+	.ahr-org-head { padding: 9px 11px; gap: 8px; }
+	.ahr-org-title { flex: 0 0 auto; }
+	/* Stats on one swipeable line instead of a 2x2 block. */
+	.ahr-org-stats {
+		gap: 16px; flex-wrap: nowrap; overflow-x: auto; width: 100%;
+		scrollbar-width: none; -webkit-overflow-scrolling: touch;
+	}
+	.ahr-org-stats::-webkit-scrollbar { display: none; }
+	.ahr-org-stat { flex: 0 0 auto; }
+	.ahr-org-stat .n { font-size: 16px; }
+	.ahr-org-stat .l { font-size: 9px; }
+	.ahr-org-tools { gap: 6px; }
+	.ahr-org-btns { flex: 1 1 auto; }
+	.ahr-org-btns .btn { flex: 1 1 auto; font-size: 12px; padding: 5px 6px; }
+	/* Issues on one swipeable line, and the explanatory sentence dropped — the
+	 * chips already say what they mean and the space is worth more. */
+	.ahr-org-issues {
+		flex-wrap: nowrap; overflow-x: auto; padding: 7px 10px; gap: 6px;
+		scrollbar-width: none; -webkit-overflow-scrolling: touch;
+	}
+	.ahr-org-issues::-webkit-scrollbar { display: none; }
+	.ahr-org-issues > span { display: none; }
+	.ahr-org-issue { flex: 0 0 auto; white-space: nowrap; }
+	.ahr-org-issues b { flex: 0 0 auto; }
+	/* Zoom is a desktop affordance; pinch and scroll do the job on a touch screen. */
+	.ahr-org-zoom { display: none; }
+}
+
+/* ===================================================================
+ * FINANCE — payroll accounting and payment
+ *
+ * The payroll run is where Finance completes the accounting, so the run
+ * has to answer three things at a glance: where it has got to, what has
+ * actually been booked, and what it may do next. All three are read from
+ * the server's own state — none of it decides anything.
+ * =================================================================== */
+
+/* Where the run has got to (§24). Display only. */
+.ahr-flow {
+	display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;
+	padding: 10px 12px; background: var(--ahr-bg);
+	border: 1px solid var(--ahr-border); border-radius: var(--ahr-r-md);
+}
+.ahr-flow-step {
+	display: inline-flex; align-items: center; gap: 6px;
+	font-size: 11.5px; font-weight: 700; white-space: nowrap;
+	padding: 5px 11px; border-radius: 20px;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border);
+	color: var(--ahr-muted);
+}
+.ahr-flow-step i { font-size: 10px; }
+.ahr-flow-step.done { color: #047857; border-color: rgba(16, 185, 129, .35);
+	background: rgba(16, 185, 129, .08); }
+.ahr-flow-step.current { color: #fff; background: var(--ahr-primary);
+	border-color: var(--ahr-primary); box-shadow: 0 3px 10px rgba(37, 99, 235, .25); }
+.ahr-flow-step.todo { opacity: .7; }
+.ahr-flow-step.err { color: #b91c1c; background: rgba(239, 68, 68, .1);
+	border-color: rgba(239, 68, 68, .35); }
+[data-theme="dark"] .ahr-flow-step.done { color: #34d399; }
+[data-theme="dark"] .ahr-flow-step.err { color: #f87171; }
+
+/* What has been booked, and what has not (§31). */
+.ahr-fin-grid {
+	display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px;
+}
+.ahr-fin-col > h6 {
+	margin: 0 0 10px; font-size: 11px; font-weight: 800; letter-spacing: .8px;
+	text-transform: uppercase; color: var(--ahr-muted);
+	display: flex; align-items: center; gap: 7px;
+}
+.ahr-fin-col > h6 i { color: var(--ahr-primary); font-size: 12px; }
+.ahr-fin-line {
+	display: flex; align-items: flex-start; gap: 8px;
+	font-size: 12.5px; line-height: 1.5; padding: 4px 0; color: var(--ahr-ink);
+}
+.ahr-fin-line i { margin-top: 2px; font-size: 12px; }
+.ahr-fin-line.ok i { color: #047857; }
+.ahr-fin-line.warn i { color: #b45309; }
+.ahr-fin-line.todo { color: var(--ahr-muted); }
+.ahr-fin-line.todo i { color: var(--ahr-border-strong); }
+.ahr-fin-vouchers { margin-top: 9px; font-size: 12px; color: var(--ahr-muted); }
+.ahr-fin-vouchers .btn { margin-left: 4px; border-radius: var(--ahr-r-sm); }
+.ahr-fin-meta { margin-top: 7px; font-size: 11.5px; color: var(--ahr-muted); }
+.ahr-fin-recon { margin-top: 18px; }
+
+@media (max-width: 700px) {
+	.ahr-flow { gap: 5px; padding: 9px 10px; }
+	.ahr-flow-step { font-size: 11px; padding: 4px 9px; }
+	.ahr-fin-grid { grid-template-columns: 1fr; }
+}
+
+/* ===================================================================== *
+ * FINAL SETTLEMENT — Lei n.º 12/23
+ *
+ * The one visual rule that matters here: an amount that comes from the
+ * statute and an amount that comes from a divisor this company chose must
+ * never look the same. Statutory basis reads as a quiet blue reference;
+ * a company convention reads amber, because it is a choice somebody made
+ * and can change. Anything unverified or missing shouts.
+ * ===================================================================== */
+.ahr-basis {
+	display: inline-block; font-size: 10.5px; line-height: 1.5; font-weight: 600;
+	padding: 1px 7px; border-radius: 999px; border: 1px solid transparent;
+	white-space: nowrap; letter-spacing: .01em;
+}
+.ahr-basis.law { background: #eef2ff; color: #3730a3; border-color: #dfe4fb; }
+.ahr-basis.company { background: #fff7ed; color: #9a3412; border-color: #fee3c7; }
+.ahr-basis.input { background: var(--ahr-tint); color: var(--ahr-muted); border-color: var(--ahr-border); }
+.ahr-basis.none { background: #f4f4f5; color: #6b7280; border-color: #e4e4e7; }
+.ahr-basis.verify { background: #fef9c3; color: #854d0e; border-color: #fde68a; }
+.ahr-basis.alert { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+
+.fs-breakdown td, .fs-breakdown th { vertical-align: top; }
+.fs-breakdown .fs-line-label { font-weight: 600; color: var(--ahr-ink); }
+.fs-breakdown .fs-line-note {
+	margin-top: 3px; font-size: 11px; line-height: 1.45; color: var(--ahr-muted);
+	max-width: 46ch;
+}
+.fs-breakdown .fs-line-calc {
+	font-family: var(--ahr-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+	font-size: 11.5px; color: var(--ahr-ink); white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+.fs-breakdown .fs-line-basis { white-space: normal; max-width: 22ch; }
+.fs-breakdown tr.fs-flagged td { background: #fffbeb; }
+
+.fs-final { margin-top: 6px; }
+.fs-final td { padding: 6px 10px; }
+.fs-final tr.fs-total td {
+	border-top: 2px solid var(--ahr-border-strong); font-size: 14px;
+	background: var(--ahr-tint);
+}
+.fs-final tr.fs-flagged td { background: #fef2f2; color: #991b1b; }
+
+.fs-static {
+	background: var(--ahr-tint); color: var(--ahr-ink);
+	display: flex; align-items: center; cursor: default;
+}
+.fs-form .ahr-form-grid .fs-wide { grid-column: 1 / -1; }
+.ahr-empty-inline {
+	padding: 12px 14px; font-size: 12.5px; color: var(--ahr-muted);
+	background: var(--ahr-tint); border: 1px dashed var(--ahr-border);
+	border-radius: var(--ahr-r-sm);
+}
+.ahr-badge.pending { background: #fff4e0; color: #d98300; border-color: #ffe2b3; }
+
+@media (max-width: 900px) {
+	.fs-breakdown .fs-line-calc { white-space: normal; }
+}

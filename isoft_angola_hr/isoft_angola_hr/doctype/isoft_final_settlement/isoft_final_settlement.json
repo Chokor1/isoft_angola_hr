@@ -1,0 +1,825 @@
+{
+ "actions": [],
+ "autoname": "HR-FS-.#####",
+ "creation": "2026-07-30 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "is_submittable": 1,
+ "field_order": [
+  "employee",
+  "employee_name",
+  "company",
+  "column_break_head",
+  "date_of_joining",
+  "termination_date",
+  "reason",
+  "notice_served",
+  "reason_key",
+  "contract",
+  "fixed_term_under_one_year",
+  "notice_required_days",
+  "notice_given_days",
+  "employer_missed_renewal_notice",
+  "calc_version",
+  "remuneration_section",
+  "base",
+  "food_allowance",
+  "transport_allowance",
+  "technical_supplement",
+  "availability_supplement",
+  "column_break_rem",
+  "monthly_remuneration",
+  "salary_section",
+  "salary_period_start",
+  "salary_period_end",
+  "salary_days_worked",
+  "period_days",
+  "weekly_hours",
+  "working_days_per_week",
+  "column_break_sal",
+  "salary_days",
+  "salary_method",
+  "salary_daily_rate",
+  "period_salary",
+  "allowances_section",
+  "months_worked",
+  "supplement_months",
+  "supplement_months_override",
+  "seniority_years",
+  "seniority_years_override",
+  "override_reason",
+  "override_by",
+  "override_at",
+  "ferias_rate",
+  "natal_rate",
+  "column_break_allow",
+  "vacation_monthly",
+  "vacation_allowance",
+  "christmas_monthly",
+  "christmas_bonus",
+  "leave_section",
+  "untaken_leave_days",
+  "leave_vested",
+  "vested_untaken_days",
+  "proportional_leave_days",
+  "total_leave_days",
+  "leave_remuneration_base",
+  "leave_base_includes_allowances",
+  "leave_rate_method",
+  "leave_days",
+  "column_break_leave",
+  "leave_daily_rate",
+  "untaken_leave_amount",
+  "vested_leave_amount",
+  "proportional_leave_amount",
+  "compensation_section",
+  "agreed_compensation",
+  "compensation_amount",
+  "column_break_comp",
+  "compensation_article",
+  "compensation_status",
+  "compensation_formula",
+  "notice_amount",
+  "deductions_section",
+  "compensation_tax_position",
+  "inss_base_amount",
+  "inss_amount",
+  "column_break_ded",
+  "irt_base_amount",
+  "irt_amount",
+  "recover_advance",
+  "advance_outstanding",
+  "advance_recovered",
+  "advance_deferred",
+  "totals_section",
+  "total_gross",
+  "total_deductions",
+  "net_payable",
+  "shortfall",
+  "settlement_due_date",
+  "payment_deadline_article",
+  "workflow_section",
+  "workflow_status",
+  "submitted_for_approval_by",
+  "submitted_for_approval_at",
+  "approved_by",
+  "approved_at",
+  "column_break_wf",
+  "rejection_reason",
+  "journal_entry",
+  "payment_entry",
+  "paid_on",
+  "trace_section",
+  "calculation_trace",
+  "calculation_flags",
+  "notes",
+  "amended_from"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "column_break_head",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "date_of_joining",
+   "fieldtype": "Date",
+   "label": "Date of Hire",
+   "read_only": 1
+  },
+  {
+   "fieldname": "termination_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Termination Date",
+   "reqd": 1
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Select",
+   "label": "Reason (legacy)",
+   "options": "\nResignation\nDismissal for Just Cause\nMutual Agreement\nEnd of Contract\nRedundancy\nOther",
+   "description": "Superseded by the Lei 12/23 termination reason. Kept so settlements created before the audit still render. It has no default: a Select whose first option is a real value silently records a reason nobody chose."
+  },
+  {
+   "default": "0",
+   "fieldname": "notice_served",
+   "fieldtype": "Check",
+   "label": "Notice Period Served"
+  },
+  {
+   "fieldname": "reason_key",
+   "fieldtype": "Select",
+   "label": "Termination Reason (Lei 12/23)",
+   "description": "Drives which compensation article applies. Leaving it empty is not the same as 'no compensation'.",
+   "options": "\nresignation_with_notice\nresignation_without_notice\nabandonment\nmutual_agreement\nfixed_term_expiry\nobjective_dismissal\ncollective_dismissal\nextinction_after_suspension\nemployer_insolvency_extinction\ndisciplinary_dismissal\nindirect_dismissal\nunlawful_dismissal_no_reinstatement\nnon_reinstatement\ndeath_incapacity_retirement\nother"
+  },
+  {
+   "fieldname": "contract",
+   "fieldtype": "Link",
+   "label": "Contract",
+   "options": "Isoft Employment Contract"
+  },
+  {
+   "fieldname": "fixed_term_under_one_year",
+   "fieldtype": "Check",
+   "label": "Fixed Term of One Year or Less",
+   "default": "0",
+   "description": "Artigo 205.º — caps payable leave at 22 working days."
+  },
+  {
+   "fieldname": "notice_required_days",
+   "fieldtype": "Int",
+   "label": "Notice Required (days)",
+   "default": "0"
+  },
+  {
+   "fieldname": "notice_given_days",
+   "fieldtype": "Int",
+   "label": "Notice Given (days)",
+   "default": "0"
+  },
+  {
+   "fieldname": "employer_missed_renewal_notice",
+   "fieldtype": "Check",
+   "label": "Employer Gave No Notice of Non-Renewal",
+   "default": "0",
+   "depends_on": "eval:doc.reason_key=='fixed_term_expiry'"
+  },
+  {
+   "fieldname": "calc_version",
+   "fieldtype": "Int",
+   "label": "Calculation Version",
+   "default": "0",
+   "read_only": 1
+  },
+  {
+   "fieldname": "remuneration_section",
+   "fieldtype": "Section Break",
+   "label": "Monthly Remuneration"
+  },
+  {
+   "fieldname": "base",
+   "fieldtype": "Currency",
+   "label": "Basic Salary"
+  },
+  {
+   "fieldname": "food_allowance",
+   "fieldtype": "Currency",
+   "label": "Meal Allowance"
+  },
+  {
+   "fieldname": "transport_allowance",
+   "fieldtype": "Currency",
+   "label": "Transportation Allowance"
+  },
+  {
+   "fieldname": "technical_supplement",
+   "fieldtype": "Currency",
+   "label": "Technical Supplement",
+   "description": "Artigo 213.º n.º 1 — part of the leave remuneration base."
+  },
+  {
+   "fieldname": "availability_supplement",
+   "fieldtype": "Currency",
+   "label": "Availability Supplement",
+   "description": "Artigo 213.º n.º 1 — part of the leave remuneration base."
+  },
+  {
+   "fieldname": "column_break_rem",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "monthly_remuneration",
+   "fieldtype": "Currency",
+   "label": "Monthly Remuneration",
+   "read_only": 1
+  },
+  {
+   "fieldname": "salary_section",
+   "fieldtype": "Section Break",
+   "label": "Salary for the Period (Proportional)"
+  },
+  {
+   "fieldname": "salary_period_start",
+   "fieldtype": "Date",
+   "label": "Period Start"
+  },
+  {
+   "fieldname": "salary_period_end",
+   "fieldtype": "Date",
+   "label": "Period End"
+  },
+  {
+   "fieldname": "salary_days_worked",
+   "fieldtype": "Float",
+   "label": "Days Worked",
+   "precision": "2"
+  },
+  {
+   "fieldname": "period_days",
+   "fieldtype": "Float",
+   "label": "Days in Period",
+   "precision": "2"
+  },
+  {
+   "fieldname": "weekly_hours",
+   "fieldtype": "Float",
+   "label": "Normal Weekly Hours (Hs)",
+   "description": "Artigo 237.º n.º 7 — S/H = (Sm × 12) / (52 × Hs).",
+   "precision": "2"
+  },
+  {
+   "fieldname": "working_days_per_week",
+   "fieldtype": "Float",
+   "label": "Working Days per Week",
+   "default": "5",
+   "precision": "2"
+  },
+  {
+   "fieldname": "column_break_sal",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "salary_days",
+   "fieldtype": "Int",
+   "label": "Salary Days (Divisor)"
+  },
+  {
+   "fieldname": "salary_method",
+   "fieldtype": "Select",
+   "label": "Salary Calculation Basis",
+   "default": "auto",
+   "options": "auto\nfull_period\nhourly_237_7\ncompany_divisor"
+  },
+  {
+   "fieldname": "salary_daily_rate",
+   "fieldtype": "Currency",
+   "label": "Daily Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "period_salary",
+   "fieldtype": "Currency",
+   "label": "Proportional Salary",
+   "read_only": 1
+  },
+  {
+   "fieldname": "allowances_section",
+   "fieldtype": "Section Break",
+   "label": "Vacation Allowance & Christmas Bonus (Proportional)"
+  },
+  {
+   "fieldname": "months_worked",
+   "fieldtype": "Int",
+   "label": "Months Worked (this year)"
+  },
+  {
+   "fieldname": "supplement_months",
+   "fieldtype": "Int",
+   "label": "Complete Months (artigo 238.º)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplement_months_override",
+   "fieldtype": "Int",
+   "label": "Override Complete Months"
+  },
+  {
+   "fieldname": "seniority_years",
+   "fieldtype": "Int",
+   "label": "Seniority Years (artigo 311.º)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "seniority_years_override",
+   "fieldtype": "Int",
+   "label": "Override Seniority Years"
+  },
+  {
+   "fieldname": "override_reason",
+   "fieldtype": "Small Text",
+   "label": "Override Reason"
+  },
+  {
+   "fieldname": "override_by",
+   "fieldtype": "Link",
+   "label": "Override By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "override_at",
+   "fieldtype": "Datetime",
+   "label": "Override At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ferias_rate",
+   "fieldtype": "Percent",
+   "label": "Vacation Allowance (% of Base)"
+  },
+  {
+   "fieldname": "natal_rate",
+   "fieldtype": "Percent",
+   "label": "Christmas Bonus (% of Base)"
+  },
+  {
+   "fieldname": "column_break_allow",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "vacation_monthly",
+   "fieldtype": "Currency",
+   "label": "Vacation Monthly Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vacation_allowance",
+   "fieldtype": "Currency",
+   "label": "Vacation Allowance Payable",
+   "read_only": 1
+  },
+  {
+   "fieldname": "christmas_monthly",
+   "fieldtype": "Currency",
+   "label": "Christmas Monthly Amount",
+   "read_only": 1
+  },
+  {
+   "fieldname": "christmas_bonus",
+   "fieldtype": "Currency",
+   "label": "Christmas Bonus Payable",
+   "read_only": 1
+  },
+  {
+   "fieldname": "leave_section",
+   "fieldtype": "Section Break",
+   "label": "Untaken Annual Leave"
+  },
+  {
+   "default": "0",
+   "fieldname": "untaken_leave_days",
+   "fieldtype": "Float",
+   "label": "Untaken Leave Days",
+   "precision": "2"
+  },
+  {
+   "fieldname": "leave_vested",
+   "fieldtype": "Select",
+   "label": "Leave Right Vested",
+   "default": "Auto",
+   "description": "Artigo 212.º — the right vests on 1 January. 'No' selects n.º 3.",
+   "options": "Auto\nYes\nNo"
+  },
+  {
+   "fieldname": "vested_untaken_days",
+   "fieldtype": "Float",
+   "label": "Vested Leave Not Taken (days)",
+   "default": "0",
+   "precision": "2"
+  },
+  {
+   "fieldname": "proportional_leave_days",
+   "fieldtype": "Float",
+   "label": "Proportional Leave (days)",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_leave_days",
+   "fieldtype": "Float",
+   "label": "Total Leave Days Payable",
+   "precision": "2",
+   "read_only": 1
+  },
+  {
+   "fieldname": "leave_remuneration_base",
+   "fieldtype": "Currency",
+   "label": "Vacation Remuneration Base",
+   "read_only": 1
+  },
+  {
+   "fieldname": "leave_base_includes_allowances",
+   "fieldtype": "Check",
+   "label": "Include Meal and Transport in Leave Base",
+   "default": "0",
+   "description": "Artigo 213.º n.º 2 excludes them unless the parties agreed."
+  },
+  {
+   "fieldname": "leave_rate_method",
+   "fieldtype": "Select",
+   "label": "Leave Rate Basis",
+   "default": "company_divisor",
+   "options": "company_divisor\nhourly_237_7"
+  },
+  {
+   "fieldname": "leave_days",
+   "fieldtype": "Int",
+   "label": "Leave Days (Divisor)"
+  },
+  {
+   "fieldname": "column_break_leave",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "leave_daily_rate",
+   "fieldtype": "Currency",
+   "label": "Daily Leave Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "untaken_leave_amount",
+   "fieldtype": "Currency",
+   "label": "Untaken Leave Compensation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "vested_leave_amount",
+   "fieldtype": "Currency",
+   "label": "Vested Leave Compensation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "proportional_leave_amount",
+   "fieldtype": "Currency",
+   "label": "Proportional Leave Compensation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "compensation_section",
+   "fieldtype": "Section Break",
+   "label": "Compensation / Indemnity"
+  },
+  {
+   "fieldname": "agreed_compensation",
+   "fieldtype": "Currency",
+   "label": "Agreed Compensation",
+   "depends_on": "eval:doc.reason_key=='mutual_agreement'"
+  },
+  {
+   "fieldname": "compensation_amount",
+   "fieldtype": "Currency",
+   "label": "Compensation Payable",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_comp",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "compensation_article",
+   "fieldtype": "Data",
+   "label": "Legal Basis",
+   "read_only": 1
+  },
+  {
+   "fieldname": "compensation_status",
+   "fieldtype": "Data",
+   "label": "Compensation Status",
+   "read_only": 1
+  },
+  {
+   "fieldname": "compensation_formula",
+   "fieldtype": "Data",
+   "label": "Calculation",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notice_amount",
+   "fieldtype": "Currency",
+   "label": "Notice Adjustment",
+   "read_only": 1
+  },
+  {
+   "fieldname": "deductions_section",
+   "fieldtype": "Section Break",
+   "label": "Deductions"
+  },
+  {
+   "fieldname": "compensation_tax_position",
+   "fieldtype": "Select",
+   "label": "Compensation Tax Position",
+   "default": "verification_required",
+   "options": "verification_required\nexempt_within_lgt_limits\ntaxable"
+  },
+  {
+   "fieldname": "inss_base_amount",
+   "fieldtype": "Currency",
+   "label": "Social Security Base",
+   "read_only": 1
+  },
+  {
+   "fieldname": "inss_amount",
+   "fieldtype": "Currency",
+   "label": "Social Security (Employee)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_ded",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "irt_base_amount",
+   "fieldtype": "Currency",
+   "label": "IRT Base",
+   "read_only": 1
+  },
+  {
+   "fieldname": "irt_amount",
+   "fieldtype": "Currency",
+   "label": "IRT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "recover_advance",
+   "fieldtype": "Check",
+   "label": "Recover Outstanding Salary Advance",
+   "default": "1"
+  },
+  {
+   "fieldname": "advance_outstanding",
+   "fieldtype": "Currency",
+   "label": "Outstanding Advance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "advance_recovered",
+   "fieldtype": "Currency",
+   "label": "Advance Recovered",
+   "read_only": 1
+  },
+  {
+   "fieldname": "advance_deferred",
+   "fieldtype": "Currency",
+   "label": "Advance Still Outstanding",
+   "read_only": 1
+  },
+  {
+   "fieldname": "totals_section",
+   "fieldtype": "Section Break",
+   "label": "Total"
+  },
+  {
+   "fieldname": "total_gross",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Gross Amount Payable",
+   "read_only": 1
+  },
+  {
+   "fieldname": "total_deductions",
+   "fieldtype": "Currency",
+   "label": "Total Deductions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "net_payable",
+   "fieldtype": "Currency",
+   "label": "Net Final Settlement",
+   "in_list_view": 1,
+   "read_only": 1
+  },
+  {
+   "fieldname": "shortfall",
+   "fieldtype": "Currency",
+   "label": "Uncovered Deductions",
+   "read_only": 1
+  },
+  {
+   "fieldname": "settlement_due_date",
+   "fieldtype": "Date",
+   "label": "Settlement Due Date",
+   "description": "Artigo 245.º n.º 4 — within three days of cessation.",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_deadline_article",
+   "fieldtype": "Data",
+   "label": "Deadline Basis",
+   "read_only": 1
+  },
+  {
+   "fieldname": "workflow_section",
+   "fieldtype": "Section Break",
+   "label": "Status"
+  },
+  {
+   "fieldname": "workflow_status",
+   "fieldtype": "Select",
+   "label": "Settlement Status",
+   "default": "Draft",
+   "in_list_view": 1,
+   "options": "Draft\nPending Approval\nApproved\nPosted\nPaid\nRejected\nCancelled",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_for_approval_by",
+   "fieldtype": "Link",
+   "label": "Submitted By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "submitted_for_approval_at",
+   "fieldtype": "Datetime",
+   "label": "Submitted At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_by",
+   "fieldtype": "Link",
+   "label": "Approved By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "approved_at",
+   "fieldtype": "Datetime",
+   "label": "Approved At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_wf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "rejection_reason",
+   "fieldtype": "Small Text",
+   "label": "Rejection Reason",
+   "read_only": 1
+  },
+  {
+   "fieldname": "journal_entry",
+   "fieldtype": "Link",
+   "label": "Journal Entry",
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_entry",
+   "fieldtype": "Link",
+   "label": "Payment Entry",
+   "options": "Journal Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "paid_on",
+   "fieldtype": "Date",
+   "label": "Paid On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "trace_section",
+   "fieldtype": "Section Break",
+   "label": "Calculation Trace"
+  },
+  {
+   "fieldname": "calculation_trace",
+   "fieldtype": "Long Text",
+   "label": "Calculation Trace",
+   "read_only": 1
+  },
+  {
+   "fieldname": "calculation_flags",
+   "fieldtype": "Long Text",
+   "label": "Calculation Flags",
+   "read_only": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "amended_from",
+   "fieldtype": "Link",
+   "label": "Amended From",
+   "no_copy": 1,
+   "options": "Isoft Final Settlement",
+   "print_hide": 1,
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-14 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Final Settlement",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "write": 1
+  },
+  {
+   "role": "HR User",
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "write": 1
+  },
+  {
+   "role": "Payroll Finance Approver",
+   "print": 1,
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "print": 1,
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "print": 1,
+   "read": 1,
+   "report": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "print": 1,
+   "read": 1,
+   "report": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "title_field": "employee_name",
+ "track_changes": 1
+}

@@ -33,6 +33,7 @@
   "total_working_days",
   "column_break_21",
   "payment_days",
+  "payment_days_override",
   "earnings_section",
   "earnings",
   "deductions_section",
@@ -43,6 +44,29 @@
   "column_break_29",
   "total_deduction",
   "net_pay",
+  "statutory_section",
+  "ss_base",
+  "ss_employee_rate",
+  "ss_employee_amount",
+  "statutory_rate",
+  "column_break_stat_1",
+  "ss_employer_rate",
+  "ss_employer_amount",
+  "employer_cost",
+  "irt_trace_section",
+  "irt_bracket_from",
+  "irt_bracket_to",
+  "irt_excess_over",
+  "column_break_stat_2",
+  "irt_rate",
+  "irt_parcela_fixa",
+  "irt_amount",
+  "column_break_stat_3",
+  "food_exemption_applied",
+  "transport_exemption_applied",
+  "payment_factor",
+  "advance_recovery",
+  "advance_deferred",
   "journal_entry",
   "payment_entry",
   "amended_from"
@@ -198,6 +222,13 @@
    "label": "Payment Days"
   },
   {
+   "fieldname": "payment_days_override",
+   "fieldtype": "Check",
+   "label": "Payment Days Overridden",
+   "default": "0",
+   "description": "Tick to stop payroll recalculating Payment Days from attendance. Leave unticked so attendance corrections always flow through."
+  },
+  {
    "fieldname": "earnings_section",
    "fieldtype": "Section Break",
    "label": "Earnings"
@@ -257,6 +288,130 @@
    "in_list_view": 1
   },
   {
+   "fieldname": "statutory_section",
+   "fieldtype": "Section Break",
+   "label": "Statutory Calculation Trace",
+   "collapsible": 1,
+   "description": "Snapshot of the rules that produced this slip. Preserved so the figures stay explainable after statutory rates change."
+  },
+  {
+   "fieldname": "ss_base",
+   "fieldtype": "Currency",
+   "label": "Segurança Social - Base de Incidência",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ss_employee_rate",
+   "fieldtype": "Percent",
+   "label": "Segurança Social - Taxa Trabalhador (%)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ss_employee_amount",
+   "fieldtype": "Currency",
+   "label": "Segurança Social - Trabalhador",
+   "read_only": 1
+  },
+  {
+   "fieldname": "statutory_rate",
+   "fieldtype": "Link",
+   "label": "Statutory Rate Applied",
+   "options": "Isoft Statutory Rate",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_stat_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "ss_employer_rate",
+   "fieldtype": "Percent",
+   "label": "Segurança Social - Taxa Entidade Patronal (%)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "ss_employer_amount",
+   "fieldtype": "Currency",
+   "label": "Segurança Social - Entidade Patronal",
+   "read_only": 1,
+   "description": "Employer cost. Does not reduce net pay."
+  },
+  {
+   "fieldname": "employer_cost",
+   "fieldtype": "Currency",
+   "label": "Custo Total Entidade Patronal",
+   "read_only": 1
+  },
+  {
+   "fieldname": "irt_trace_section",
+   "fieldtype": "Section Break",
+   "label": "IRT Trace",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "irt_bracket_from",
+   "fieldtype": "Currency",
+   "label": "IRT Bracket From",
+   "read_only": 1
+  },
+  {
+   "fieldname": "irt_bracket_to",
+   "fieldtype": "Currency",
+   "label": "IRT Bracket To",
+   "read_only": 1
+  },
+  {
+   "fieldname": "irt_excess_over",
+   "fieldtype": "Currency",
+   "label": "IRT Excess Over",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_stat_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "irt_rate",
+   "fieldtype": "Percent",
+   "label": "IRT Rate (%)",
+   "read_only": 1
+  },
+  {
+   "fieldname": "irt_parcela_fixa",
+   "fieldtype": "Currency",
+   "label": "IRT Parcela Fixa",
+   "read_only": 1
+  },
+  {
+   "fieldname": "irt_amount",
+   "fieldtype": "Currency",
+   "label": "IRT",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_stat_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "food_exemption_applied",
+   "fieldtype": "Currency",
+   "label": "Food Allowance Exemption Applied",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transport_exemption_applied",
+   "fieldtype": "Currency",
+   "label": "Transport Allowance Exemption Applied",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_factor",
+   "fieldtype": "Float",
+   "label": "Proration Factor",
+   "read_only": 1,
+   "precision": "6"
+  },
+  {
    "fieldname": "journal_entry",
    "fieldtype": "Link",
    "label": "Journal Entry (Accrual)",
@@ -280,6 +435,19 @@
    "read_only": 1,
    "no_copy": 1,
    "print_hide": 1
+  },
+  {
+   "fieldname": "advance_recovery",
+   "fieldtype": "Currency",
+   "label": "Salary Advance Recovered",
+   "read_only": 1
+  },
+  {
+   "fieldname": "advance_deferred",
+   "fieldtype": "Currency",
+   "label": "Advance Deferred (not recoverable this period)",
+   "read_only": 1,
+   "description": "The part of the scheduled advance installment that would have driven net pay below zero. It stays outstanding."
   }
  ],
  "index_web_pages_for_search": 1,
@@ -290,6 +458,11 @@
  "name": "Isoft Salary Slip",
  "owner": "Administrator",
  "permissions": [
+  {
+   "role": "Employee",
+   "read": 1,
+   "print": 1
+  },
   {
    "create": 1,
    "delete": 1,
@@ -304,6 +477,42 @@
    "cancel": 1,
    "amend": 1,
    "write": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "create": 1,
+   "write": 1,
+   "share": 1,
+   "email": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Finance Approver",
+   "submit": 1,
+   "cancel": 1,
+   "amend": 1,
+   "write": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Accounts Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
   }
  ],
  "sort_field": "modified",

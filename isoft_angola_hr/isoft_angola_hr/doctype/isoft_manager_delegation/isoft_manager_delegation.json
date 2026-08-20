@@ -1,0 +1,162 @@
+{
+ "actions": [],
+ "autoname": "format:DLG-{#####}",
+ "creation": "2026-08-11 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "delegator",
+  "delegator_name",
+  "delegate",
+  "delegate_name",
+  "column_break_1",
+  "from_date",
+  "to_date",
+  "status",
+  "detail_section",
+  "scope_note",
+  "reason",
+  "audit_section",
+  "created_by_user",
+  "column_break_2",
+  "revoked_by",
+  "revoked_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "delegator",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Delegating Manager",
+   "options": "Employee",
+   "read_only": 1,
+   "reqd": 1
+  },
+  {
+   "fieldname": "delegator_name",
+   "fieldtype": "Data",
+   "label": "Delegator Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "delegate",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Acting Manager",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fieldname": "delegate_name",
+   "fieldtype": "Data",
+   "label": "Delegate Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "From",
+   "reqd": 1
+  },
+  {
+   "fieldname": "to_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "To",
+   "reqd": 1
+  },
+  {
+   "default": "Active",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Status",
+   "options": "Active\nRevoked\nExpired",
+   "read_only": 1
+  },
+  {
+   "fieldname": "detail_section",
+   "fieldtype": "Section Break",
+   "label": "Scope"
+  },
+  {
+   "fieldname": "scope_note",
+   "fieldtype": "HTML",
+   "options": "<div class='text-muted small'>Delegation covers only the delegator's own team approvals — leave, attendance and performance reviews. It never transfers payroll, HR Manager or company-wide access.</div>"
+  },
+  {
+   "fieldname": "reason",
+   "fieldtype": "Small Text",
+   "label": "Reason"
+  },
+  {
+   "fieldname": "audit_section",
+   "fieldtype": "Section Break",
+   "label": "Audit"
+  },
+  {
+   "fieldname": "created_by_user",
+   "fieldtype": "Link",
+   "label": "Created By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "revoked_by",
+   "fieldtype": "Link",
+   "label": "Revoked By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "revoked_at",
+   "fieldtype": "Datetime",
+   "label": "Revoked At",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-11 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Manager Delegation",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "write": 1
+  },
+  {
+   "create": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Employee"
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

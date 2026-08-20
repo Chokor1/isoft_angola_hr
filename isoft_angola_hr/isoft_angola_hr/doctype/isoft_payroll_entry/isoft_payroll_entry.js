@@ -1,4 +1,5 @@
-// Copyright (c) 2026, Abbass Chokor and contributors
+// Copyright (c) 2026, ISOFT LDA
+// Author: Abbass Chokor
 // For license information, please see license.txt
 
 frappe.ui.form.on("Isoft Payroll Entry", {

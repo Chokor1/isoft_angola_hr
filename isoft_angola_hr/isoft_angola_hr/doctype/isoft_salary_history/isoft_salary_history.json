@@ -1,0 +1,136 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-08-05 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "employee",
+  "employee_name",
+  "salary_profile",
+  "change_date",
+  "changed_by",
+  "column_break_1",
+  "base",
+  "food_allowance",
+  "transport_allowance",
+  "family_allowance",
+  "change_type",
+  "note"
+ ],
+ "fields": [
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fieldname": "salary_profile",
+   "fieldtype": "Link",
+   "label": "Salary Profile",
+   "options": "Isoft Salary Profile",
+   "read_only": 1
+  },
+  {
+   "fieldname": "change_date",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Change Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "changed_by",
+   "fieldtype": "Link",
+   "label": "Changed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "base",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Base Salary",
+   "read_only": 1
+  },
+  {
+   "fieldname": "food_allowance",
+   "fieldtype": "Currency",
+   "label": "Food Allowance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "transport_allowance",
+   "fieldtype": "Currency",
+   "label": "Transport Allowance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "family_allowance",
+   "fieldtype": "Currency",
+   "label": "Family Allowance",
+   "read_only": 1
+  },
+  {
+   "fieldname": "change_type",
+   "fieldtype": "Data",
+   "label": "Change Type",
+   "read_only": 1
+  },
+  {
+   "fieldname": "note",
+   "fieldtype": "Small Text",
+   "label": "Note",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-05 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Salary History",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "read": 1,
+   "report": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "print": 1
+  }
+ ],
+ "sort_field": "change_date",
+ "sort_order": "DESC"
+}

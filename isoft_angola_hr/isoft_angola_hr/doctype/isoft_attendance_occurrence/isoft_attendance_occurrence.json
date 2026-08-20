@@ -11,28 +11,143 @@
   "occurrence_date",
   "occurrence_type",
   "hours",
+  "authorized",
+  "approved_by",
   "column_break_1",
   "status",
   "justification_deadline",
   "justification_reason",
   "justification_date",
   "justification_document",
+  "justification_source",
+  "is_extraordinary",
+  "extraordinary_note",
   "remarks"
  ],
  "fields": [
-  {"fieldname": "employee", "fieldtype": "Link", "label": "Employee", "options": "Employee", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
-  {"fetch_from": "employee.employee_name", "fieldname": "employee_name", "fieldtype": "Data", "label": "Employee Name", "read_only": 1, "in_list_view": 1},
-  {"fetch_from": "employee.company", "fieldname": "company", "fieldtype": "Link", "label": "Company", "options": "Company"},
-  {"fieldname": "occurrence_date", "fieldtype": "Date", "label": "Occurrence Date", "reqd": 1, "in_list_view": 1, "default": "Today"},
-  {"fieldname": "occurrence_type", "fieldtype": "Select", "label": "Type", "options": "Lateness\nEarly Exit\nPartial Absence\nHalf Day\nFull Day", "reqd": 1, "in_list_view": 1, "default": "Full Day"},
-  {"fieldname": "hours", "fieldtype": "Float", "label": "Missing Hours", "description": "Hours not worked (for Lateness / Early Exit / Partial Absence). Ignored for Half/Full Day."},
-  {"fieldname": "column_break_1", "fieldtype": "Column Break"},
-  {"fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Pending Justification\nJustified\nUnjustified", "default": "Pending Justification", "in_list_view": 1, "in_standard_filter": 1},
-  {"fieldname": "justification_deadline", "fieldtype": "Date", "label": "Justification Deadline", "read_only": 1},
-  {"fieldname": "justification_reason", "fieldtype": "Link", "label": "Justification Reason", "options": "Isoft Absence Reason"},
-  {"fieldname": "justification_date", "fieldtype": "Date", "label": "Justification Date", "read_only": 1},
-  {"fieldname": "justification_document", "fieldtype": "Attach", "label": "Supporting Document"},
-  {"fieldname": "remarks", "fieldtype": "Small Text", "label": "Remarks"}
+  {
+   "fieldname": "employee",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Employee",
+   "options": "Employee",
+   "reqd": 1
+  },
+  {
+   "fetch_from": "employee.employee_name",
+   "fieldname": "employee_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Employee Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "employee.company",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "default": "Today",
+   "fieldname": "occurrence_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Occurrence Date",
+   "reqd": 1
+  },
+  {
+   "default": "Full Day",
+   "fieldname": "occurrence_type",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Type",
+   "options": "Lateness\nEarly Exit\nPartial Absence\nHalf Day\nFull Day",
+   "reqd": 1
+  },
+  {
+   "description": "Hours not worked (for Lateness / Early Exit / Partial Absence). Ignored for Half/Full Day.",
+   "fieldname": "hours",
+   "fieldtype": "Float",
+   "label": "Missing Hours"
+  },
+  {
+   "default": "0",
+   "description": "Pre-approved or scheduled (e.g. medical appointment). Created already Justified; exempt from the 5-day cycle.",
+   "fieldname": "authorized",
+   "fieldtype": "Check",
+   "label": "Authorized / Pre-approved"
+  },
+  {
+   "depends_on": "authorized",
+   "description": "Supervisor who authorized this in advance.",
+   "fieldname": "approved_by",
+   "fieldtype": "Data",
+   "label": "Approved By"
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Pending Justification",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Pending Justification\nJustified\nUnjustified"
+  },
+  {
+   "fieldname": "justification_deadline",
+   "fieldtype": "Date",
+   "label": "Justification Deadline",
+   "read_only": 1
+  },
+  {
+   "fieldname": "justification_reason",
+   "fieldtype": "Link",
+   "label": "Justification Reason",
+   "options": "Isoft Absence Reason"
+  },
+  {
+   "fieldname": "justification_date",
+   "fieldtype": "Date",
+   "label": "Justification Date",
+   "read_only": 1
+  },
+  {
+   "fieldname": "justification_document",
+   "fieldtype": "Attach",
+   "label": "Supporting Document"
+  },
+  {
+   "description": "How the explanation reached HR — e.g. the employee handed in a medical certificate.",
+   "fieldname": "justification_source",
+   "fieldtype": "Select",
+   "label": "Justification Source",
+   "options": "\nEmployee verbal request\nEmail\nWritten request\nManagement instruction\nHR initiated\nOther"
+  },
+  {
+   "default": "0",
+   "description": "Allows re-justifying after the 5-day window in exceptional cases (hospitalization, death, …). HR Manager only.",
+   "fieldname": "is_extraordinary",
+   "fieldtype": "Check",
+   "label": "Extraordinary Override"
+  },
+  {
+   "depends_on": "is_extraordinary",
+   "fieldname": "extraordinary_note",
+   "fieldtype": "Small Text",
+   "label": "Extraordinary Note",
+   "mandatory_depends_on": "is_extraordinary"
+  },
+  {
+   "fieldname": "remarks",
+   "fieldtype": "Small Text",
+   "label": "Remarks"
+  }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
@@ -42,7 +157,42 @@
  "name": "Isoft Attendance Occurrence",
  "owner": "Administrator",
  "permissions": [
-  {"create": 1, "delete": 1, "email": 1, "export": 1, "print": 1, "read": 1, "report": 1, "role": "HR Manager", "share": 1, "write": 1}
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "HR User",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Payroll Officer",
+   "share": 1,
+   "write": 1
+  }
  ],
  "sort_field": "modified",
  "sort_order": "DESC",

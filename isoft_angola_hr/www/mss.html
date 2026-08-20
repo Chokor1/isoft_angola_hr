@@ -1,0 +1,32 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _("Área da Chefia") }}{% endblock %}
+
+{% block head_include %}
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<link rel="stylesheet" href="/assets/frappe/css/font-awesome.min.css">
+<link rel="stylesheet" href="/assets/isoft_angola_hr/css/isoft_ss.css?v={{ frappe.utils.now() }}">
+{% endblock %}
+
+{% block breadcrumbs %}{% endblock %}
+{% block header %}{% endblock %}
+
+{% block page_content %}
+<div class="ss-app" id="mss-root">
+	<noscript>
+		<div class="ss-alert bad">
+			{{ _("Esta área precisa de JavaScript activado no seu navegador.") }}
+		</div>
+	</noscript>
+	<div class="ss-skel ss-skel-card"></div>
+	<div class="ss-skel ss-skel-card"></div>
+	<div class="ss-skel ss-skel-card"></div>
+</div>
+{% endblock %}
+
+{% block script %}
+{{ super() }}
+<script src="/assets/isoft_angola_hr/js/isoft_ss.js?v={{ frappe.utils.now() }}"></script>
+<script src="/assets/isoft_angola_hr/js/isoft_mss.js?v={{ frappe.utils.now() }}"></script>
+{% endblock %}

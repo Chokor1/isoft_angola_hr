@@ -1,0 +1,146 @@
+{
+ "actions": [],
+ "creation": "2026-08-10 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "contract_type",
+  "contract_type_pt",
+  "column_break_2",
+  "disabled",
+  "terms_section",
+  "is_fixed_term",
+  "default_duration_months",
+  "renewable",
+  "column_break_7",
+  "default_probation_days",
+  "default_notice_days",
+  "notes_section",
+  "description"
+ ],
+ "fields": [
+  {
+   "fieldname": "contract_type",
+   "fieldtype": "Data",
+   "label": "Contract Type",
+   "reqd": 1,
+   "unique": 1,
+   "in_list_view": 1
+  },
+  {
+   "fieldname": "contract_type_pt",
+   "fieldtype": "Data",
+   "label": "Designação (Português)"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "disabled",
+   "fieldtype": "Check",
+   "label": "Disabled",
+   "default": "0"
+  },
+  {
+   "fieldname": "terms_section",
+   "fieldtype": "Section Break",
+   "label": "Default Terms"
+  },
+  {
+   "fieldname": "is_fixed_term",
+   "fieldtype": "Check",
+   "label": "Fixed Term (has an end date)",
+   "default": "0",
+   "description": "Fixed-term contracts require an End Date. Open-ended ones do not."
+  },
+  {
+   "fieldname": "default_duration_months",
+   "fieldtype": "Int",
+   "label": "Default Duration (months)",
+   "depends_on": "is_fixed_term"
+  },
+  {
+   "fieldname": "renewable",
+   "fieldtype": "Check",
+   "label": "Renewable",
+   "default": "1"
+  },
+  {
+   "fieldname": "column_break_7",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "default_probation_days",
+   "fieldtype": "Int",
+   "label": "Default Probation (days)"
+  },
+  {
+   "fieldname": "default_notice_days",
+   "fieldtype": "Int",
+   "label": "Default Notice Period (days)"
+  },
+  {
+   "fieldname": "notes_section",
+   "fieldtype": "Section Break",
+   "label": "Notes"
+  },
+  {
+   "fieldname": "description",
+   "fieldtype": "Small Text",
+   "label": "Description",
+   "description": "LEGAL VERIFICATION REQUIRED — these defaults are configuration only. No statutory right, term limit or severance rule is inferred from the contract type by this application."
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-08-10 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Contract Type",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "role": "HR Manager",
+   "create": 1,
+   "write": 1,
+   "delete": 1,
+   "share": 1,
+   "email": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "HR User",
+   "create": 1,
+   "write": 1,
+   "share": 1,
+   "email": 1,
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Officer",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  },
+  {
+   "role": "Payroll Manager",
+   "read": 1,
+   "report": 1,
+   "export": 1,
+   "print": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1,
+ "autoname": "field:contract_type"
+}
