@@ -43,10 +43,22 @@ APP_ROLES = (PAYROLL_OFFICER, PAYROLL_MANAGER, PAYROLL_FINANCE)
 #: existing ERPNext role that real finance staff already hold, so a site does not have
 #: to invent a new user just to post payroll. HR Manager is NOT here — that separation
 #: is the entire point of the phase.
+#:
+#: Holding one of these roles is necessary but, since audit finding F-03, not sufficient:
+#: see :func:`is_payroll_finance`. On the ITEC site every HR user also held Accounts
+#: Manager, so the same person prepared, posted, released and paid the payroll while the
+#: role table said Finance had done it.
 _FINANCE = frozenset({PAYROLL_FINANCE, ACCOUNTS_MANAGER})
 
 _PREPARERS = frozenset({PAYROLL_OFFICER, HR_MANAGER})
 _APPROVERS = frozenset({PAYROLL_MANAGER, HR_MANAGER})
+
+#: The HR / payroll-preparation side of the house. A user who holds any of these AND
+#: Accounts Manager is an HR person with an accounting role, not Finance — Accounts
+#: Manager is granted for many reasons that have nothing to do with payroll. Payroll
+#: Finance Approver is different: it exists only to post and pay payroll, so granting
+#: it is an explicit decision that the user is Finance for payroll purposes.
+HR_SIDE_ROLES = frozenset({HR_USER, HR_MANAGER, PAYROLL_OFFICER, PAYROLL_MANAGER})
 _PAYROLL_VIEWERS = frozenset({HR_USER, PAYROLL_OFFICER, PAYROLL_MANAGER, PAYROLL_FINANCE,
                               ACCOUNTS_MANAGER, HR_MANAGER})
 
@@ -72,8 +84,21 @@ PAYROLL_REJECT = "payroll.reject"
 PAYROLL_POST = "payroll.post"
 PAYROLL_EXPORT_BANK = "payroll.export_bank"
 PAYROLL_CONFIRM_PAYMENT = "payroll.confirm_payment"
+#: Readable alias: "pay" is release for payment, the bank file and the payment entries.
+PAYROLL_PAY = PAYROLL_CONFIRM_PAYMENT
 PAYROLL_CANCEL = "payroll.cancel"
 PAYROLL_CLOSE = "payroll.close"
+
+#: Actions that move money or book it. Each is governed by a Finance switch in
+#: Isoft HR Settings (see :func:`finance_switch`) and by :func:`is_payroll_finance`.
+FINANCE_ACTIONS = frozenset({PAYROLL_POST, PAYROLL_EXPORT_BANK, PAYROLL_CONFIRM_PAYMENT})
+
+#: Which switch governs which finance action. Posting is one decision, paying another.
+FINANCE_SWITCH = {
+	PAYROLL_POST: "payroll_posting_requires_finance",
+	PAYROLL_EXPORT_BANK: "payroll_payment_requires_finance",
+	PAYROLL_CONFIRM_PAYMENT: "payroll_payment_requires_finance",
+}
 
 STATUTORY_READ = "statutory.read"
 STATUTORY_WRITE = "statutory.write"
@@ -218,31 +243,78 @@ def user_roles(user=None):
 	return set(frappe.get_roles(user or frappe.session.user))
 
 
-def can(action, user=None):
-	"""True when the user holds a role allowed to perform ``action``.
+def finance_switch(action):
+	"""Whether the Finance rule applies to ``action`` right now (Isoft HR Settings).
 
-	Administrator is allowed because Frappe grants it every role anyway; pretending
-	otherwise would only produce a check that is wrong about its own system.
+	Read from the stored row on every call: an absent switch means nobody has decided,
+	and the safe answer for a control that keeps HR away from the money is ON.
+	"""
+	field = FINANCE_SWITCH.get(action)
+	if not field:
+		return False
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import (
+		separation_required,
+	)
+	return bool(separation_required(field, 1))
+
+
+def is_payroll_finance(user=None, roles=None):
+	"""Is this user Finance for payroll purposes?
+
+	* Payroll Finance Approver — yes: the role exists for nothing else.
+	* Accounts Manager — yes, **unless** the user also holds an HR-side role. An HR
+	  Manager with Accounts Manager is the situation the audit found at ITEC: the role
+	  was granted for accounting screens, and it silently made the payroll preparer
+	  the payroll payer as well.
+	* Anything else — no.
+	"""
+	roles = set(roles) if roles is not None else user_roles(user)
+	if PAYROLL_FINANCE in roles:
+		return True
+	if ACCOUNTS_MANAGER in roles and not (roles & HR_SIDE_ROLES):
+		return True
+	return False
+
+
+def refusal(action, user=None):
+	"""Why ``user`` may not perform ``action`` — or None when they may.
+
+	The capability check proper. The role table is the first gate; for the finance
+	actions the Finance rule is the second, whenever its switch is on.
 	"""
 	allowed = ACTION_ROLES.get(action)
 	if allowed is None:
 		raise KeyError("Unknown payroll action: {0}".format(action))
 	user = user or frappe.session.user
 	if user == "Administrator":
-		return True
-	return bool(allowed & user_roles(user))
+		# Frappe grants Administrator every role; pretending otherwise would only produce
+		# a check that is wrong about its own system. The identity rules of the workflow
+		# (who prepared, who approved) still apply to Administrator.
+		return None
+	roles = user_roles(user)
+	if not (allowed & roles):
+		return _("You are not authorised to perform this operation ({0}). Required role: {1}.").format(
+			action, ", ".join(sorted(allowed)))
+	if action in FINANCE_ACTIONS and finance_switch(action) and not is_payroll_finance(user, roles):
+		return _("{0} is a Finance action. It requires the Payroll Finance Approver role, or "
+		         "Accounts Manager held by somebody who is not HR or payroll staff. "
+		         "(Isoft HR Settings → Payroll Controls.)").format(action)
+	return None
+
+
+def can(action, user=None):
+	"""True when the user may perform ``action``: holds an allowed role and, for the
+	finance actions, passes the Finance rule. Buttons are rendered from this and every
+	endpoint re-checks it through :func:`require`."""
+	return refusal(action, user=user) is None
 
 
 def require(action, user=None):
 	"""Raise PermissionError unless the user may perform ``action``."""
-	if can(action, user=user):
+	why = refusal(action, user=user)
+	if why is None:
 		return True
-	allowed = sorted(ACTION_ROLES[action])
-	frappe.throw(
-		_("You are not authorised to perform this operation ({0}). Required role: {1}.").format(
-			action, ", ".join(allowed)),
-		frappe.PermissionError,
-	)
+	frappe.throw(why, frappe.PermissionError)
 
 
 def any_of(actions, user=None):

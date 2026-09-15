@@ -1,10 +1,23 @@
 # Copyright (c) 2026, ISOFT LDA
 # Author: Abbass Chokor
 # For license information, please see license.txt
-"""HR alerts — few, targeted, and never repeated.
+"""HR alerts — DISABLED. Nothing in this module notifies anybody.
+
+The application no longer produces notifications of any kind: see
+``services/notification_policy.py`` for the policy and the reasoning. The two writers
+below — :func:`_notify` and :func:`_tell` — return immediately, and with them every
+producer in this file and in ``performance``, ``ess_uploads`` and the attendance sweeps.
+The document-event hooks and the daily scheduled job that used to drive them have been
+unregistered in ``hooks.py``.
+
+The code is kept rather than deleted so that the decision is reversible by one constant,
+and so that what was switched off is legible. Everything below this line describes how it
+behaved when it was on.
+
+----
 
 The failure mode for HR notifications is not missing one, it is sending so many that
-people filter the lot. Three rules keep this honest:
+people filter the lot. Three rules kept this honest:
 
 1. **Thresholds, not daily nagging.** A contract expiring in 90 days produces exactly one
    alert at 90 days, one at 60, and so on. Crossing a threshold is the event.
@@ -22,6 +35,7 @@ from frappe import _
 from frappe.utils import cint, getdate, nowdate
 
 from isoft_angola_hr.isoft_angola_hr.services import contracts
+from isoft_angola_hr.isoft_angola_hr.services import notification_policy as policy
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 
 #: Below this many days remaining, the employee's line manager is copied in as well.
@@ -51,6 +65,12 @@ def _notify(subject, message, users, doctype=None, name=None):
 	the next threshold produces a new one. ``document_type`` must be a real DocType —
 	Notification Log links it — so the alert stays clickable through to the record.
 	"""
+	if policy.suppressed():
+		# The single gate for every bell notification this application produces. See
+		# services/notification_policy.py — the application does not notify anybody, and
+		# returning 0 keeps every caller's "how many did I send" contract intact.
+		return 0
+
 	users = [u for u in dict.fromkeys(users) if u]
 	sent = 0
 	for user in users:
@@ -99,7 +119,7 @@ def contract_expiry_alerts():
 		if threshold <= ESCALATE_TO_MANAGER_AT:
 			users.append(_manager_user(row["employee"]))
 		sent += _notify(
-			_("Contrato {0} termina dentro de {1} dias").format(row["name"], threshold),
+			_("Contract {0} ends within {1} days").format(row["name"], threshold),
 			_("Employment contract {0} for {1} ends on {2}. Renew it, or let it expire "
 			  "deliberately.").format(row["name"], row["employee_name"], row["end_date"]),
 			users, "Isoft Employment Contract", row["name"])
@@ -118,7 +138,7 @@ def probation_alerts():
 		users = list(hr_users) + [_manager_user(row["employee"])]
 		bucket = "overdue" if overdue else ("due" if days_left <= 15 else "soon")
 		sent += _notify(
-			_("Período experimental — {0} ({1})").format(row["name"], bucket),
+			_("Probation period — {0} ({1})").format(row["name"], bucket),
 			_("Probation for {0} ends on {1}. Confirm, extend or end the probation on "
 			  "contract {2}.").format(row["employee_name"], row["probation_end"], row["name"]),
 			users, "Isoft Employment Contract", row["name"])
@@ -146,7 +166,7 @@ def document_expiry_alerts():
 		if threshold is None:
 			continue
 		sent += _notify(
-			_("Documento {0} expira dentro de {1} dias").format(row["name"], threshold),
+			_("Document {0} expires in {1} days").format(row["name"], threshold),
 			_("{0} for {1} expires on {2}.").format(
 				row["document_type"], row["employee_name"], row["expiry_date"]),
 			hr_users, "Isoft Employee Document", row["name"])
@@ -177,13 +197,23 @@ def pending_approval_alerts():
 		by_type[row["type"]] = by_type.get(row["type"], 0) + 1
 	summary = ", ".join("{0}: {1}".format(k, v) for k, v in sorted(by_type.items()))
 	return _notify(
-		_("Aprovações de RH pendentes em {0}").format(getdate(nowdate())),
+		_("HR approvals pending on {0}").format(getdate(nowdate())),
 		_("Waiting for a decision — {0}.").format(summary),
 		_recipients_hr())
 
 
 def run_daily_alerts():
-	"""The single scheduled entry point."""
+	"""The former scheduled entry point. No longer registered in hooks.py.
+
+	The hook was removed rather than left to run and do nothing: a job that wakes every
+	worker daily to produce zero notifications is a cost with no purpose, and it reads to
+	the next person as though notifications were still expected. The function is kept, and
+	guarded, so the policy is enforced even if something calls it directly.
+	"""
+	if policy.suppressed():
+		return {"contract_expiry": 0, "probation": 0, "document_expiry": 0,
+		        "pending_approvals": 0, "disabled": True}
+
 	result = {
 		"contract_expiry": contract_expiry_alerts(),
 		"probation": probation_alerts(),
@@ -213,6 +243,13 @@ def _link(doctype, name):
 
 def _tell(employee, subject, message, doctype=None, name=None, email=False):
 	"""Notify the employee themselves, if they have a login."""
+	if policy.suppressed():
+		# Guarded here as well as in _notify, not only through it: this is the one place
+		# that calls frappe.sendmail, and an e-mail leaves the application's access
+		# control behind the moment it is sent. It must be impossible to reach even if
+		# somebody later changes how _notify is called.
+		return 0
+
 	user = _user_of(employee)
 	if not user:
 		return 0
@@ -261,7 +298,7 @@ def notify_payslip_available(doc, method=None):
 	if cint(doc.docstatus) != 1:
 		return
 	_tell(doc.employee,
-	      _("Recibo de vencimento disponível — {0}").format(doc.end_date),
+	      _("Payslip available — {0}").format(doc.end_date),
 	      _("Your payslip for the period ending {0} has been approved and is available in "
 	        "the self-service area.").format(doc.end_date),
 	      "Isoft Salary Slip", doc.name, email=True)
@@ -272,9 +309,9 @@ def notify_leave_decision(doc, method=None):
 	"""Approved or rejected leave, to the employee who asked for it."""
 	if doc.status not in ("Approved", "Rejected"):
 		return
-	word = _("aprovado") if doc.status == "Approved" else _("recusado")
+	word = _("approved") if doc.status == "Approved" else _("rejected")
 	_tell(doc.employee,
-	      _("Pedido de férias {0} — {1}").format(word, doc.name),
+	      _("Leave request {0} — {1}").format(word, doc.name),
 	      _("Your leave request {0} ({1} to {2}) was {3}.").format(
 		      doc.name, doc.from_date, doc.to_date, _(doc.status)),
 	      "Leave Application", doc.name, email=True)
@@ -288,7 +325,7 @@ def notify_leave_requested(doc, method=None):
 	manager_user = _manager_user(doc.employee)
 	if not manager_user:
 		return
-	_notify(_("Férias por aprovar — {0}").format(doc.name),
+	_notify(_("Leave awaiting approval — {0}").format(doc.name),
 	        _("{0} requested {1} from {2} to {3}. Decide it in the manager area.").format(
 		        doc.employee_name, doc.leave_type, doc.from_date, doc.to_date),
 	        [manager_user], "Leave Application", doc.name)
@@ -299,7 +336,7 @@ def notify_bank_change_decision(doc, method=None):
 	if doc.status not in ("Approved", "Rejected"):
 		return
 	_tell(doc.employee,
-	      _("Alteração bancária {0} — {1}").format(_(doc.status), doc.name),
+	      _("Bank details change {0} — {1}").format(_(doc.status), doc.name),
 	      _("Your bank details change request {0} was {1}. The account number is not "
 	        "included in this message for security.").format(doc.name, _(doc.status)),
 	      "Isoft Bank Change Request", doc.name, email=True)
@@ -326,6 +363,22 @@ def notification_centre(user=None):
 	disagree — nothing is duplicated into a separate inbox table that then goes stale.
 	"""
 	user = user or frappe.session.user
+
+	if policy.suppressed():
+		# The notification centre IS the notification feature, so it goes with it. It is
+		# returned empty rather than removed: the shape is preserved so any caller keeps
+		# working, and `disabled` says why it is empty instead of leaving somebody to
+		# conclude the query is broken.
+		#
+		# It is not merely filtered to this app's rows — the Notification Log is shared
+		# with Frappe and ERPNext, and re-publishing THEIR notifications through an HR
+		# endpoint would put this application back in the business of telling people
+		# things. Frappe's own bell menu still shows them, untouched.
+		return {"unread": [], "recent": [], "pending_approvals": [], "contract_expiry": [],
+		        "probation": [], "documents": [], "disabled": True,
+		        "counts": {"unread": 0, "approvals": 0, "contracts": 0, "probation": 0,
+		                   "documents": 0}}
+
 	# `read` is a reserved word in MariaDB — unquoted it is a syntax error, not a
 	# missing column, so the whole notification centre would return nothing.
 	unread = frappe.db.sql(
@@ -361,7 +414,16 @@ def notification_centre(user=None):
 
 
 def mark_read(names=None):
-	"""Clear notifications the user has actually looked at."""
+	"""Clear notifications the user has actually looked at.
+
+	A no-op under the policy. It only ever wrote to rows whose ``for_user`` was the
+	caller, so nothing is lost by declining — and marking somebody's ERPNext notifications
+	read from an HR endpoint would be this application acting on a feed it no longer
+	participates in.
+	"""
+	if policy.suppressed():
+		return 0
+
 	user = frappe.session.user
 	if names:
 		names = frappe.parse_json(names) if isinstance(names, str) else names

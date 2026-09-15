@@ -48,26 +48,46 @@ REJECT = "reject"
 DISBURSE = "disburse"
 CANCEL = "cancel"
 
+#: The happy path, in order, for the progress strip on screen.
+STAGES = (DRAFT, PENDING_APPROVAL, APPROVED, DISBURSED, RECOVERING, SETTLED)
+
 _TRANSITIONS = {
 	SUBMIT: {"from": (DRAFT, REJECTED), "to": PENDING_APPROVAL,
 	         "permission": perms.ADVANCE_REQUEST,
-	         "stamp": ("requested_by", "requested_at"), "label": _("Submit for Approval")},
+	         "stamp": ("requested_by", "requested_at"), "label": "Submit for Approval"},
 	APPROVE: {"from": (PENDING_APPROVAL,), "to": APPROVED,
 	          "permission": perms.ADVANCE_APPROVE, "stamp": ("approved_by", "approved_at"),
-	          "label": _("Approve Advance")},
+	          "label": "Approve Advance"},
 	REJECT: {"from": (PENDING_APPROVAL,), "to": REJECTED,
 	         "permission": perms.ADVANCE_APPROVE, "stamp": (None, None),
-	         "label": _("Reject Advance")},
+	         "label": "Reject Advance"},
 	DISBURSE: {"from": (APPROVED,), "to": DISBURSED,
 	           "permission": perms.ADVANCE_DISBURSE, "stamp": (None, None),
-	           "label": _("Disburse Advance")},
+	           "label": "Disburse Advance"},
 	CANCEL: {"from": (DRAFT, PENDING_APPROVAL, APPROVED, REJECTED), "to": CANCELLED,
-	         "permission": perms.ADVANCE_REQUEST, "stamp": (None, None), "label": _("Cancel")},
+	         "permission": perms.ADVANCE_REQUEST, "stamp": (None, None), "label": "Cancel"},
 }
+
+#: Public alias — the UI summary reads the transition table so a screen can
+#: never describe a workflow differently from the rule that enforces it.
+TRANSITIONS = _TRANSITIONS
 
 
 def state_of(advance):
 	return advance.get("status") or DRAFT
+
+
+def action_label(action):
+	"""Human label for a transition, taken from the transition table itself so a button
+	can never describe an action differently from the rule that governs it."""
+	spec = _TRANSITIONS.get(action)
+	# Translated HERE — see the note in contracts.action_label.
+	return _(spec["label"]) if spec else action
+
+
+def actions_for(doc, user=None):
+	"""[(action, label)] the user may perform on ``doc`` right now."""
+	return [{"action": a, "label": action_label(a)} for a in allowed_actions(doc, user=user)]
 
 
 def allowed_actions(advance, user=None):
@@ -93,8 +113,9 @@ def _is_self_approval(advance, user=None):
 
 
 def requires_separate_approval():
-	value = frappe.db.get_single_value("Isoft HR Settings", "require_separate_advance_approval")
-	return cint(1 if value is None or value == "" else value)
+	"""See isoft_hr_settings.separation_required for why this is not get_single_value."""
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import separation_required
+	return separation_required("require_separate_advance_approval")
 
 
 def assert_transition(advance, action, user=None):
@@ -110,8 +131,8 @@ def assert_transition(advance, action, user=None):
 			title=_("Invalid State"))
 	if action == APPROVE and _is_self_approval(advance, user):
 		frappe.throw(
-			_("Não pode aprovar um adiantamento que pediu. An advance requested by {0} must be "
-			  "approved by a different user.").format(advance.get("requested_by")),
+			_("You cannot approve an advance you requested. An advance requested by {0} must "
+			  "be approved by a different user.").format(advance.get("requested_by")),
 			title=_("Self-Approval Blocked"))
 	return spec
 
@@ -198,6 +219,15 @@ def disburse(advance):
 	                       "debit_in_account_currency": flt(advance.approved_amount)})
 	je.append("accounts", {"account": bank, "cost_center": cost_center,
 	                       "credit_in_account_currency": flt(advance.approved_amount)})
+	# Posted by the application on behalf of an already-authorised action, not by the user
+	# browsing to Journal Entry. The capability layer decided this above
+	# (perms.ADVANCE_DISBURSE), so re-checking the raw DocType permission here would
+	# require every payroll poster to also hold blanket Journal Entry rights. That is the
+	# opposite of least privilege: Payroll Finance Approver — the role this app creates
+	# precisely to post payroll — would need full accounting access to do its own job,
+	# while still being unable to post payroll without it. Scoping stays where it belongs:
+	# this voucher can only be produced through the payroll flow that authorised it.
+	je.flags.ignore_permissions = True
 	je.insert()
 	je.submit()
 	advance.db_set("disbursement_entry", je.name, update_modified=False)

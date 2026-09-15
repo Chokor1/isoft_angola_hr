@@ -12,12 +12,46 @@ from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import salary_change as sc
 
 
+#: The pay decision itself. Editing these after submission rewrites what was approved.
+TERMS_FIELDS = ("employee", "new_base", "effective_date", "change_type")
+
+
 class IsoftSalaryChange(Document):
 	def validate(self):
 		self.set_defaults()
 		self.load_current_values()
 		self.compute_change()
 		self.validate_effective_date()
+		self.validate_terms_not_rewritten()
+
+	def validate_terms_not_rewritten(self):
+		"""Stop the approved pay decision being edited around the workflow.
+
+		HR records the change and somebody else approves it, so write access is wider than
+		approve access. Without this, saving the form after approval would be enough to
+		change somebody's salary to a figure nobody approved.
+		"""
+		if self.is_new():
+			return
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		if before.status in (sc.DRAFT, sc.REJECTED):
+			return                      # still the requester's to edit
+
+		changed = [f for f in TERMS_FIELDS if str(before.get(f) or "") != str(self.get(f) or "")]
+		if not changed:
+			return
+
+		labels = ", ".join(self.meta.get_label(f) or f for f in changed)
+		if before.status == sc.APPLIED:
+			frappe.throw(_("{0} cannot be changed: this salary change has already been "
+			               "applied and is the record of what happened. Raise a new "
+			               "salary change instead.").format(labels))
+		if not perms.can(perms.SALARY_CHANGE_APPROVE):
+			frappe.throw(_("{0} cannot be changed while the salary change is {1}. Only an "
+			               "approver may adjust the terms being approved.")
+			             .format(labels, _(before.status)))
 
 	def set_defaults(self):
 		if not self.status:

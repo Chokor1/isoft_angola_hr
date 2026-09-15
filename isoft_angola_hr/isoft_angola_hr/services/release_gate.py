@@ -129,11 +129,14 @@ def _declared(kind):
 PORTAL_ROUTES = ("ess", "mss")
 
 #: Scheduled jobs the product needs. A missing entry here means contracts silently stop
-#: expiring and nobody is ever told.
+#: expiring, or an approved salary change never reaches the Salary Profile.
+#:
+#: ``hr_notifications.run_daily_alerts`` was removed from this list along with the rest of
+#: the notification system (see services/notification_policy.py). Every job that remains
+#: changes derived state; none of them tells anybody anything.
 SCHEDULED_JOBS = (
 	"isoft_angola_hr.isoft_angola_hr.services.contracts.refresh_contract_statuses",
 	"isoft_angola_hr.isoft_angola_hr.services.salary_change.apply_due_changes",
-	"isoft_angola_hr.isoft_angola_hr.services.hr_notifications.run_daily_alerts",
 	"isoft_angola_hr.isoft_angola_hr.doctype.isoft_employee_document."
 	"isoft_employee_document.refresh_document_statuses",
 )
@@ -240,8 +243,8 @@ def install_verification():
 	except Exception:
 		inactive = cint((frappe.get_conf() or {}).get("pause_scheduler"))
 	add("scheduler", _("Scheduler running"), not inactive,
-	    _("inactive — contracts will not expire and no alert will be sent") if inactive
-	    else _("active"), warn=True)
+	    _("inactive — contracts will not expire and approved salary changes will not be "
+	      "applied on their effective date") if inactive else _("active"), warn=True)
 
 	# --- Permissions --------------------------------------------------------- #
 	# The Employee role must hold read on the self-service DocTypes and must NOT hold

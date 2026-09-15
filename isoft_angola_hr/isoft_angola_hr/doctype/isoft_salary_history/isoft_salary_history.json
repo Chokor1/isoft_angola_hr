@@ -9,6 +9,7 @@
   "employee",
   "employee_name",
   "salary_profile",
+  "from_date",
   "change_date",
   "changed_by",
   "column_break_1",
@@ -41,6 +42,14 @@
    "fieldtype": "Link",
    "label": "Salary Profile",
    "options": "Isoft Salary Profile",
+   "read_only": 1
+  },
+  {
+   "description": "The date the salary takes effect (the Salary Profile's From Date). Change Date records when the edit was made, which is a different thing and is often months later.",
+   "fieldname": "from_date",
+   "fieldtype": "Date",
+   "in_list_view": 1,
+   "label": "Effective From",
    "read_only": 1
   },
   {
@@ -119,16 +128,16 @@
    "write": 1
   },
   {
-   "role": "Payroll Officer",
+   "print": 1,
    "read": 1,
    "report": 1,
-   "print": 1
+   "role": "Payroll Officer"
   },
   {
-   "role": "Payroll Manager",
+   "print": 1,
    "read": 1,
    "report": 1,
-   "print": 1
+   "role": "Payroll Manager"
   }
  ],
  "sort_field": "change_date",

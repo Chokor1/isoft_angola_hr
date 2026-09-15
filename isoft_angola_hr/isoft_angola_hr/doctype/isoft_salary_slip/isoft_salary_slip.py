@@ -17,6 +17,7 @@ from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 
 class IsoftSalarySlip(Document):
 	def validate(self):
+		self.validate_belongs_to_run()
 		wf.assert_slip_not_locked(self)
 		self.validate_no_duplicate_payroll()
 		self.validate_enabled_components()
@@ -24,24 +25,67 @@ class IsoftSalarySlip(Document):
 		self.set_working_days()
 		self.compute()
 
+	def validate_belongs_to_run(self):
+		"""A salary slip exists only inside a payroll run.
+
+		A slip with no Payroll Entry had no approval to check, so the posting and payment
+		guards let it through: an HR Manager could create one in the Desk (or over REST),
+		submit it, and Finance could post and pay it without anybody having approved a
+		payroll. The run is therefore mandatory from the moment the slip is created, it
+		must be the run for this company and period, and the link may never be re-pointed
+		afterwards — a slip cannot migrate into a run that was approved without it.
+		"""
+		if not self.payroll_entry:
+			frappe.throw(
+				_("A salary slip can only be created by a payroll run. Create the Payroll "
+				  "Entry for {0} – {1} and calculate it; slips are never entered by hand.").format(
+					getdate(self.start_date) if self.start_date else "?",
+					getdate(self.end_date) if self.end_date else "?"),
+				frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+
+		if not self.is_new():
+			before = self.get_doc_before_save() or frappe.get_doc(self.doctype, self.name)
+			if before.get("payroll_entry") and before.get("payroll_entry") != self.payroll_entry:
+				frappe.throw(
+					_("Salary slip {0} belongs to payroll {1} and cannot be moved to {2}.").format(
+						self.name, frappe.bold(before.get("payroll_entry")), frappe.bold(self.payroll_entry)),
+					frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+
+		run = frappe.db.get_value("Isoft Payroll Entry", self.payroll_entry,
+		                          ["company", "start_date", "end_date"], as_dict=True)
+		if not run:
+			frappe.throw(_("Payroll {0} does not exist.").format(self.payroll_entry),
+			             frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+		if (run.company != self.company or getdate(run.start_date) != getdate(self.start_date)
+				or getdate(run.end_date) != getdate(self.end_date)):
+			frappe.throw(
+				_("Salary slip {0} ({1}, {2} – {3}) does not match payroll {4} ({5}, {6} – {7}).").format(
+					self.name or _("new"), self.company, getdate(self.start_date), getdate(self.end_date),
+					frappe.bold(self.payroll_entry), run.company, getdate(run.start_date), getdate(run.end_date)),
+				frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+
 	def validate_payroll_approved(self):
-		"""A slip belonging to a payroll run may only be submitted once that run is approved.
+		"""A slip may only be submitted once its payroll run is approved and lists it.
 
 		Submitting the slip is what turns a calculation into a payroll document, so it is
 		the point where approval has to be proven. Without this, calling ``submit`` on the
 		slip directly would sidestep the whole approval workflow while the Payroll Entry
-		still showed "Calculated".
+		still showed "Calculated". A slip that is not in the run's employee table was not
+		part of what the approver signed off, however its Link field reads.
 		"""
 		if not self.payroll_entry:
-			return
+			frappe.throw(
+				_("Salary slip {0} does not belong to a payroll run and cannot be submitted.").format(
+					self.name), frappe.PermissionError, title=_("Not Part of a Payroll Run"))
 		state = wf.entry_state(self.payroll_entry)
 		if state not in (wf.APPROVED, wf.POSTED, wf.PAYMENT_READY, wf.PAID):
 			frappe.throw(
-				_("O processamento salarial {0} ainda não foi aprovado (estado: {1}). Os recibos "
-				  "só podem ser submetidos depois da aprovação.").format(
+				_("Payroll {0} has not been approved yet (state: {1}). Salary slips may only "
+				  "be submitted after approval.").format(
 					frappe.bold(self.payroll_entry), _(state or wf.DRAFT)),
 				title=_("Payroll Not Approved"),
 			)
+		wf.assert_slip_in_run(self.payroll_entry, self.name)
 
 	def validate_no_duplicate_payroll(self):
 		"""One employee, one submitted salary slip per period — across ALL payroll entries.
@@ -196,7 +240,10 @@ class IsoftSalarySlip(Document):
 
 		# Auto-fill the December Natal default on a brand-new slip when it wasn't set
 		# (e.g. a slip created directly, not via the payroll preview). HR can still edit it.
-		if self.is_new() and self.subsidio_natal is None:
+		# Only when the component is switched on: filling it while it is off made the
+		# document reject itself on its own auto-filled value.
+		if (self.is_new() and self.subsidio_natal is None
+				and engine.component_enabled(settings, "SNA")):
 			self.subsidio_natal = engine.default_natal(
 				profile.base, settings.natal_rate,
 				frappe.db.get_value("Employee", self.employee, "date_of_joining"), self.end_date,
@@ -261,19 +308,17 @@ class IsoftSalarySlip(Document):
 
 
 def get_holiday_dates(employee, start_date, end_date):
-	"""Set of holiday dates for the employee's holiday list within the period."""
-	from erpnext.hr.doctype.employee.employee import get_holiday_list_for_employee
+	"""Set of holiday dates governing this employee within the period.
 
-	holiday_list = get_holiday_list_for_employee(employee, raise_exception=False)
-	if not holiday_list:
-		return set()
-	rows = frappe.db.sql(
-		"""select holiday_date from `tabHoliday`
-		where parent=%s and parenttype='Holiday List'
-		and holiday_date between %s and %s""",
-		(holiday_list, getdate(start_date), getdate(end_date)),
-	)
-	return {getdate(r[0]) for r in rows}
+	Resolution lives in one place for the whole application - see
+	:mod:`services.work_calendar`. It used to be ERPNext's
+	``get_holiday_list_for_employee`` (Employee field, then Company default), which
+	ignored the Holiday List declared on the employee's Shift Type even when the
+	employee's own field pointed at a list that had expired years earlier.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.services import work_calendar
+
+	return work_calendar.holiday_dates(employee, start_date, end_date)
 
 
 def get_holiday_count(employee, start_date, end_date):
@@ -300,18 +345,14 @@ def _td_hours(start, end):
 
 def employee_shift(employee, for_date):
 	"""The Shift Type governing an employee on a date — a covering Shift Assignment if any,
-	else the Employee's Default Shift. None when none is set (caller uses the default calendar)."""
-	d = getdate(for_date)
-	sa = frappe.db.sql(
-		"""select shift_type from `tabShift Assignment`
-		where employee=%s and docstatus=1 and start_date<=%s
-		and (end_date is null or end_date>=%s) and ifnull(shift_type,'')!=''
-		order by start_date desc limit 1""",
-		(employee, d, d),
-	)
-	if sa and sa[0][0]:
-		return sa[0][0]
-	return frappe.db.get_value("Employee", employee, "default_shift")
+	else the Employee's Default Shift. None when none is set (caller uses the default calendar).
+
+	Kept as the name payroll calls; the resolution itself lives beside the holiday
+	resolution it has to agree with, in :mod:`services.work_calendar`.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.services import work_calendar
+
+	return work_calendar.shift_on(employee, for_date)
 
 
 def shift_day_hours(shift, day):
@@ -341,6 +382,103 @@ def shift_day_weight(shift, day, std_hours):
 	return (nh / (flt(std_hours) or 8.0)) if nh > 0 else 0.0
 
 
+#: Weekdays a shift can schedule, used to find its own full-day length.
+_WEEK = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+
+
+def shift_full_day_hours(shift):
+	"""How long a WHOLE working day is for this shift — the shift's own longest scheduled
+	day, not a global setting.
+
+	This is the reference a day is measured against. Deriving it from the shift means a
+	9.5-hour ITEC weekday is a full day because that IS the shift's full day, while its
+	4-hour Saturday is visibly a short one. Using ``standard_daily_hours`` here instead is
+	exactly what made a 9.5-hour day worth 1.1875 days.
+	"""
+	from frappe.utils import add_days, getdate
+
+	# a Monday..Sunday window, so every weekday the shift defines is seen once
+	probe = getdate("2026-01-05")  # a Monday
+	hours = [shift_day_hours(shift, add_days(probe, i)) for i in range(7)]
+	full = max(hours) if hours else 0.0
+	return full or 8.0
+
+
+def shift_day_units(shift, day):
+	"""What one scheduled date is worth in DAYS: 1 for a full day, 0.5 for a short one.
+
+	The rule the payroll runs on: a full scheduled weekday is one working day whatever its
+	clock length, a short day (the 4-hour Saturday) is half a day, and a non-working day is
+	nothing. Length decides only whether the day is FULL or SHORT — it never scales a day
+	above 1, and it is never divided by ``standard_daily_hours``.
+	"""
+	hours = shift_day_hours(shift, day)
+	if hours <= 0:
+		return 0.0
+	return 1.0 if hours >= shift_full_day_hours(shift) else HALF_DAY
+
+
+#: A scheduled day shorter than the shift's own full day counts as half a working day.
+HALF_DAY = 0.5
+
+
+def working_days_basis():
+	"""The configured Working Days Basis, resolved in one place."""
+	return frappe.get_cached_doc("Isoft HR Settings").get("working_days_basis") or "Auto (Holiday List)"
+
+
+#: The only basis that measures in hour-equivalents. Everything else counts DAYS, and a
+#: day basis must never divide by an hours figure — that is what made a 9.5-hour shift
+#: worth 1.1875 "days" and put 28.625 in a column headed Paid/Total Days.
+HOUR_EQUIVALENT_BASIS = "Auto (Holiday List)"
+
+
+def counts_in_days(basis=None):
+	"""True when the configured basis measures whole working DAYS rather than hours."""
+	return (basis or working_days_basis()) != HOUR_EQUIVALENT_BASIS
+
+
+def eligible_range(employee, start, end):
+	"""Narrow a payroll period to the dates the employee is actually employed for.
+
+	Joining and leaving mid-period previously counted the whole period: the loop walked
+	start..end regardless, so somebody who joined on the 20th was credited with a full
+	month of working days and, with nothing to deduct them, paid for it.
+	"""
+	row = frappe.db.get_value("Employee", employee, ["date_of_joining", "relieving_date"],
+	                          as_dict=True) or {}
+	joined, left = row.get("date_of_joining"), row.get("relieving_date")
+	if joined and getdate(joined) > getdate(start):
+		start = getdate(joined)
+	if left and getdate(left) < getdate(end):
+		end = getdate(left)
+	return getdate(start), getdate(end)
+
+
+def day_value(shift, day, std_hours, basis=None):
+	"""What one calendar date is worth, in the unit the configured basis counts in.
+
+	* "Auto (Holiday List)" counts standard-day EQUIVALENTS: a 9.5h day is worth 1.1875
+	  and a 4h Saturday 0.5, so both the month's total and every absence follow hours.
+	* "Calendar Working Days" and "Standard (Fixed)" count DAYS: a full scheduled day is
+	  1 whatever its clock length, a short day (the 4-hour Saturday) is 0.5, and a
+	  non-working day is 0. A month of 22 weekdays and 5 Saturdays is therefore 24.5 days
+	  — not 28.625 (hours dressed as days) and not 27 (a half-day Saturday counted whole).
+
+	The period total and every absence deduction are both measured with this function,
+	and they must be. Counting the total in days while deducting absences in
+	standard-day equivalents divides two different units and silently mis-prices every
+	absence: a 1.5h absence cost 0.72%% of salary under the fixed basis against 0.67%%
+	under the auto basis, purely because of the mismatch.
+	"""
+	if not counts_in_days(basis):
+		return shift_day_weight(shift, day, std_hours)
+	# A full scheduled weekday is one day whatever its clock length; a short day is half
+	# a day. Nothing here divides by standard_daily_hours, so this basis does not depend
+	# on that setting at all.
+	return shift_day_units(shift, day)
+
+
 def shift_hours_for(employee, for_date):
 	"""Convenience: normal hours for an employee on a date, resolving their shift."""
 	return shift_day_hours(employee_shift(employee, for_date), for_date)
@@ -351,20 +489,32 @@ def compute_working_days(employee, start_date, end_date, validate_attendance=0, 
 
 	total_working_days (TWD) depends on the "Working Days Basis" setting:
 	    * Standard (Fixed): a fixed number from Settings (e.g. 30/26).
+	    * Calendar Working Days: a count of DAYS the shift schedules, each worth 1 whatever
+	      its length (a 4h Saturday counts as a day). This is the figure HR expects to read.
 	    * Auto: sum of each non-holiday day's weight from the employee's Shift Type schedule
-	      (a full weekday = 1, a 4h Saturday = 0.5, a non-working day = 0).
+	      (a full weekday = 1, a 4h Saturday = 0.5, a 9.5h day = 1.1875, a non-working
+	      day = 0), so the total is in standard-day equivalents rather than days.
+	  Whichever is chosen, absences are deducted in the SAME unit — see day_value().
 
 	payment_days (paid days):
 	    * based_on_timesheet: logged timesheet hours / standard daily hours (capped at TWD).
 	    * validate_attendance: TWD minus each day's shortfall (Absent = full day weight,
-	      Half Day = half, unpaid leave = full, partial = missing-hours share). Paid leave is
-	      not deducted.
+	      Half Day = half, unpaid leave = full). A Present day short of its scheduled hours
+	      is pro-rated ONLY under the hour-equivalent basis; under a day basis a partial
+	      absence must be recorded as a Half Day or an Attendance Occurrence.
 	    * otherwise: full TWD.
+
+	Both figures cover only the dates the employee is employed for — joining or leaving
+	mid-period shortens the range rather than paying for the whole of it.
 	"""
-	start, end = getdate(start_date), getdate(end_date)
 	settings = frappe.get_cached_doc("Isoft HR Settings")
 	basis = settings.get("working_days_basis") or "Auto (Holiday List)"
+	# Only the hour-equivalent basis divides by this; a day basis never touches it.
 	std = flt(settings.get("standard_daily_hours")) or 8
+	# Count only the dates this employee is employed for.
+	start, end = eligible_range(employee, getdate(start_date), getdate(end_date))
+	if start > end:                      # employed for none of this period
+		return 0.0, 0.0
 	shift = employee_shift(employee, end)  # resolved once for the period
 	if basis == "Standard (Fixed)":
 		twd = flt(settings.get("standard_working_days")) or 30.0
@@ -373,8 +523,8 @@ def compute_working_days(employee, start_date, end_date, validate_attendance=0, 
 		twd = 0.0
 		d = start
 		while d <= end:
-			if d not in holidays:  # weight is 0 on non-working days (per the shift)
-				twd += shift_day_weight(shift, d, std)
+			if d not in holidays:  # value is 0 on non-working days (per the shift)
+				twd += day_value(shift, d, std, basis)
 			d = add_days(d, 1)
 
 	if cint(based_on_timesheet):
@@ -404,14 +554,24 @@ def compute_working_days(employee, start_date, end_date, validate_attendance=0, 
 			nh = shift_day_hours(shift, d)
 			if nh <= 0:
 				continue  # non-working day for this employee
-			w = shift_day_weight(shift, d, std)  # value of a full day of THIS date
+			w = day_value(shift, d, std, basis)  # value of a full day of THIS date
 			if r.status == "Absent":
 				m = w
 			elif r.status == "Half Day":
 				m = w / 2.0
 			elif r.status == "On Leave":
 				m = w if r.leave_type in lwp_types else 0.0
-			elif r.status in ("Present", "Work From Home") and r.working_hours and flt(r.working_hours) < nh:
+			elif (r.status in ("Present", "Work From Home") and not counts_in_days(basis)
+			      and r.working_hours and flt(r.working_hours) < nh):
+				# Hour-equivalent basis only. Under a DAY basis the day is the unit and
+				# the status is the record: somebody marked Present is present, and
+				# docking part of their day because the hours field says 8 against a
+				# 9.5-hour shift silently re-prices attendance in hours — the same
+				# hours-as-days confusion this basis exists to avoid. It also assumes the
+				# shift span is all paid time, which for a 9.5-hour span that may include
+				# an unpaid break is not established. A partial absence under a day basis
+				# has to be recorded as one: Half Day, or an Attendance Occurrence, both
+				# of which still deduct below.
 				m = (nh - flt(r.working_hours)) / nh * w
 			else:
 				m = 0.0
@@ -419,7 +579,7 @@ def compute_working_days(employee, start_date, end_date, validate_attendance=0, 
 
 		# Attendance Occurrences are authoritative for the days they cover: a Justified/Pending
 		# occurrence means no deduction; an Unjustified one deducts its missing portion.
-		covered, occ_deduct = occurrence_missing_by_date(employee, start, end)
+		covered, occ_deduct = occurrence_missing_by_date(employee, start, end, basis=basis)
 		missing = 0.0
 		for d in set(att) | set(covered):
 			missing += occ_deduct.get(d, 0.0) if d in covered else att.get(d, 0.0)

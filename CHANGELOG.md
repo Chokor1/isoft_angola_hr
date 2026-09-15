@@ -1,5 +1,171 @@
 # Isoft Angola HR — Release Notes
 
+## Payslip — HR review (10 September 2026)
+
+The HR manager reviewed a printed "Recibo de Vencimento" and marked what to remove. Gone
+from both copies: the company logo; the company phone / e-mail / website line; *Tipo de Contrato*; *Data de
+Admissão*; the *Período de Processamento* row of the employee block (the period is in the
+header and in the processing box); the itemised **Descontos** table — employee INSS, IRT
+and *Total de Descontos* remain in the summary; the *Salário Bruto* line of the summary
+(it is *Total de Remunerações*); and the *Data* field beside the employee's signature.
+Nothing about the figures changed. Test added: `test_the_elements_hr_asked_to_remove_are_not_printed`.
+
+## Final production readiness — Finance checklist, mapping governance, approval gate (September 2026)
+
+Closes the payroll audit: the four findings (F-01 … F-04) are in place; this release turns
+them into one answer — **READY** or **BLOCKED**, with the exact reasons — and stops a
+payroll before approval rather than at posting.
+
+* **Finance approval checklist** (`payroll_accounts.finance_checklist`, nine items): mapping
+  complete · employee INSS liability · employer INSS expense (and payable) · salary advance
+  · payroll payable · bank · no mapping drift against the previous payroll · all salary
+  components mapped · no blocking readiness exceptions. Shown at the top of the Payroll
+  screen, inside every run before approval ("Approval check"), and in Production
+  Readiness. Endpoint `finance_approval_checklist`.
+* **Approval gate** (`services/payroll_approval.py`): submitting for approval and approving
+  are refused, with every reason at once, while any account the run posts to is missing or
+  unusable, a salary component is unmapped, a readiness exception blocks an employee of the
+  run, an employee has no (or an ambiguous / zero-base) salary profile, a slip is orphaned,
+  cancelled, duplicated or covered by another slip, or a journal requirement (payable,
+  cost centre, currency, fiscal year) is missing. Codes APR-001 … APR-008.
+* **Account mapping governance**: every change to a payroll account mapping is recorded in
+  the new **Isoft Payroll Account Change** (changed by, changed on, old account, new
+  account, whether a payroll had already been posted). A change after posting is announced
+  — *This account mapping was changed after payroll posting. Previous payroll vouchers
+  remain unchanged. New payroll will use the new mapping.* — and blocks new approvals until
+  Finance confirms the current mapping on record (`confirm_account_mapping`, Settings →
+  Account mapping history). History is never rewritten; the log itself cannot be edited or
+  deleted.
+* **Bank payment validation**: the file is refused unless the run carries an approval and
+  a release, every submitted slip has its accrual in the ledger, the payable booked equals
+  the payroll total, every employee has a valid IBAN, nobody is already paid and no earlier
+  file was submitted to or executed by the bank (BNK-010 … BNK-015).
+* **Business language for HR**: *Employer Social Security expense account is not
+  configured. Please contact Finance.* — with the technical detail (component, required
+  nature, where to configure) underneath for Finance. Approve / Submit for Approval are
+  inert while the approval check is BLOCKED; the reasons are on screen.
+* Tests: `test_p46_final_readiness` — missing account blocks posting; mapping drift warning;
+  historical vouchers unchanged; approval refused with missing configuration; manager
+  approves and Finance posts and pays when correct; HR cannot bypass Finance controls by
+  any channel; bank file requires approved, posted, released payroll and refuses a second
+  payment; a paid payroll is immutable.
+
+## Payroll account mapping integrity — audit finding F-04 (September 2026)
+
+Two components (Salary Advance, Employer INSS cost) were unmapped on the ITEC site and the
+employee-INSS account had been re-pointed after July was posted. Nothing chose an account
+for Finance; the system now protects the ledger until Finance does.
+
+* **Posting is checked before any voucher exists** (`services/payroll_accounts.py`).
+  Every component that will produce a line on the slips being posted must have an
+  account that exists, is a leaf, is enabled and not frozen, belongs to the company, is
+  in the payroll currency and has the right nature (earnings Expense; deductions Liability
+  or Asset; employer cost Expense; employer payable Liability; payable Liability; bank
+  Asset or Liability). A bulk run is checked as a whole first, so a missing account can
+  no longer post half a payroll. The refusal names the component, the required nature
+  and where it is configured. Payment is checked the same way (payable + bank).
+* **Calculation is never blocked** by the mapping — HR keeps working; submission for
+  approval and posting are.
+* **Readiness says what to do**: *BLOCKING — Missing payroll account mapping: Salary
+  Advance — Adiantamento (ADT) — Missing — required account type: Liability or Asset —
+  configure in Isoft HR Settings → Account per Component.*
+* **Finance checklist** in Production Readiness: component accounts, employer INSS (cost
+  and payable), advance, payroll payable, bank — plus whether the mapping still matches
+  the last posted payroll. Documented in docs/FINANCE_GUIDE.md.
+* **History is protected**: no Journal Entry, payroll or slip is rewritten. A mapping
+  change after posting is reported by the reconciliation as *mapping drift*, with the
+  accounts the vouchers actually hold.
+* Tests: `test_p45_payroll_accounts` — missing ADT, missing CTSSE, missing payable/bank,
+  wrong nature (with Settings bypassed), group/disabled accounts, fully mapped posting
+  with sides and balance verified, no partial bulk posting, historical protection and
+  drift, readiness wording, checklist.
+
+## HR / Finance segregation — audit finding F-03 (September 2026)
+
+Every ITEC HR user also held Accounts Manager, so the role table said Finance had posted,
+released and paid the July payroll while the same HR user had done all of it.
+
+* **A capability, not a role name, decides the finance actions.** `permissions.can()` now
+  asks two questions for post, bank file and payment: does the user hold a finance role,
+  and are they Finance for payroll purposes (`is_payroll_finance`)? Payroll Finance
+  Approver always is. Accounts Manager is — unless the same user also holds HR User,
+  HR Manager, Payroll Officer or Payroll Manager, in which case the accounting role was
+  granted for something else and does not make them payroll Finance.
+* **The preparer never posts or pays.** Whoever calculated or submitted a run cannot
+  post it, submit its slips, release it, generate its bank file, record the bank's answer
+  or confirm its payment — whatever roles they hold, Administrator included. The approver
+  still cannot pay (existing rule).
+* **Three visible switches** in Isoft HR Settings → Payroll Controls: *Allow HR
+  self-approval* (default OFF), *Payroll posting requires Finance* (default ON), *Payroll
+  payment requires Finance* (default ON). An absent switch reads as its safe default.
+* **Buttons follow the server.** Post, Submit Slips, Make Payment and Export Bank File are
+  rendered from `finance_flags` (role, Finance rule, company, preparer, state), so an HR
+  Manager sees Calculate and Submit for Approval and nothing of Finance's.
+* Production readiness gains *Finance users who may post and pay* (BLOCKED when every
+  Accounts Manager is neutralised by an HR role).
+* Tests: `test_p44_finance_segregation` — the complete matrix for HR Manager, Payroll
+  Officer, Payroll Manager, Finance Approver, Accounts Manager, an HR Manager who is
+  handed Accounts Manager, an unauthorised user and Administrator, through the API,
+  `frappe.client` and direct document actions.
+
+## Workflow integrity — audit findings F-01 and F-02 (September 2026)
+
+* **The payroll lifecycle can no longer be edited outside the workflow.** The state, every
+  audit stamp and the approval snapshot of an Isoft Payroll Entry were read-only in the
+  form only: `frappe.client.set_value`, `frappe.client.save`, the REST resource API and any
+  hand-written `doc.save()` accepted them from whoever held *write* on the DocType, and one
+  such call marked a payroll Paid — or Approved with a forged approver — with no approval
+  and no ledger entry. `payroll_workflow.assert_lifecycle_untouched` now refuses every
+  such save, Administrator included; only `perform()` and `refresh_payment_state()` write
+  those fields, inside `payroll_workflow.transition()`. A new run may be born Draft with
+  its creator as preparer, and nothing else.
+* **A salary slip exists only inside its payroll run.** A slip with no Payroll Entry had no
+  approval to check, so it could be created in the Desk, submitted by an HR Manager and
+  posted and paid by Finance. Slips now require their run from creation, must match its
+  company and period, can never be re-pointed, and can be submitted, posted or paid only
+  when the run is approved **and lists the slip** in its employee table.
+* Tests: `test_p43_workflow_integrity` (both findings, every channel, every role);
+  `test_p41`'s status-laundering test now performs the write instead of reading a docstring;
+  the shared `PayrollFixture` creates test slips inside a real run.
+
+## Payslip redesigned — "Recibo de Vencimento" / "Payslip" (September 2026)
+
+The printed salary receipt is now a professional A4 document, printed twice per slip —
+**ORIGINAL** for the employee and **DUPLICADO - ARQUIVO EMPRESA** for the company file —
+in the language of the person printing it. See **docs/PAYSLIP_RECEIPT.md**.
+
+* **One format, wired everywhere.** "Recibo de Vencimento" is now the DocType's default
+  print format, so the Desk *Print* button no longer opens the raw Standard field dump. The
+  ESS PDF link, the HR dashboard action and the release gate already pointed at it.
+* **Complete.** Company NIF, address and logo; employee ID, NIF, social-security number,
+  category, designation, department, employment type, admission date, payroll period and
+  reference; paid / total / absence / leave days and approved overtime hours; earnings and
+  deductions with codes, read from the slip's own rows; gross, taxable income, employee
+  INSS, IRT, total deductions and **TOTAL A RECEBER**; payment method, date, currency,
+  bank and IBAN; declaration, signature and date lines.
+* **Follows the reader's language, at render time.** A Portuguese user gets *Recibo de
+  Vencimento / Funcionário / Salário Base / Descontos / Assinatura do Trabalhador*; an
+  English user gets *Payslip / Employee / Basic Salary / Deductions / Employee Signature*.
+  Names, identifiers, codes and amounts are never translated. Labels carry their own
+  translation context because, with ERPNext listed after this app in `apps.txt`, its
+  Brazilian catalogue silently replaced the Angolan wording for shared English words
+  ("Folha de Pagamento", "Rem. Líquida").
+* **Payroll untouched.** Every figure is copied from the fields the engine stored;
+  `payroll/recibo.py` only reads. Absence days is the same subtraction the HR explanation
+  panel shows, and leave days now come from one shared helper for both.
+* **Fits.** Stress-tested with a 45-character name, long department and designation,
+  seven-figure amounts, every optional earning, five deductions and informative rows: still
+  one page per copy. Frappe's own `.print-format` padding, which wkhtmltopdf applied at
+  0.2 in top and bottom, is zeroed for print — it used to push a blank third page out.
+* **Template in files.** `recibo_de_vencimento.html` / `.css` next to the Print Format
+  fixture; `install.py` copies them into the record on every migrate instead of carrying
+  the HTML as a Python constant.
+* **Tests.** `test_p42_payslip_receipt` — content, both languages, two A4 pages, stress
+  layout, installation and record-level security (an employee cannot open, download or
+  list another employee's payslip). The existing `test_p8_recibo` fixture now uses the
+  previous calendar month: it marked Attendance on future dates and failed on the first
+  days of every month.
+
 ## Final Settlement rewritten against Lei n.º 12/23 (August 2026)
 
 The Final Settlement was audited against the current Lei Geral do Trabalho — **Lei

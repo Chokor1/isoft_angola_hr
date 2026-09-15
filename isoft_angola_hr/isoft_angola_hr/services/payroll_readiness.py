@@ -35,25 +35,28 @@ WARNING = "WARNING"
 # Exception catalogue
 # --------------------------------------------------------------------------- #
 EXCEPTIONS = {
-	"EXC-001": (BLOCKING, _("No Salary Profile")),
-	"EXC-002": (BLOCKING, _("Ambiguous Salary Profile")),
-	"EXC-003": (BLOCKING, _("Invalid working / payment days")),
-	"EXC-004": (BLOCKING, _("Negative net salary")),
-	"EXC-005": (BLOCKING, _("Missing statutory configuration")),
-	"EXC-006": (BLOCKING, _("Missing payroll account")),
-	"EXC-007": (PAYMENT, _("Missing IBAN")),
-	"EXC-008": (WARNING, _("Missing NIF")),
-	"EXC-009": (WARNING, _("Missing Social Security number")),
-	"EXC-010": (WARNING, _("Pending attendance occurrence")),
-	"EXC-011": (BLOCKING, _("Salary changes inside the payroll period")),
-	"EXC-012": (BLOCKING, _("Already processed in this period")),
+	"EXC-001": (BLOCKING, "No Salary Profile"),
+	"EXC-002": (BLOCKING, "Ambiguous Salary Profile"),
+	"EXC-003": (BLOCKING, "Invalid working / payment days"),
+	"EXC-004": (BLOCKING, "Negative net salary"),
+	"EXC-005": (BLOCKING, "Missing statutory configuration"),
+	"EXC-006": (BLOCKING, "Missing payroll account"),
+	"EXC-007": (PAYMENT, "Missing IBAN"),
+	"EXC-008": (WARNING, "Missing NIF"),
+	"EXC-009": (WARNING, "Missing Social Security number"),
+	"EXC-010": (WARNING, "Pending attendance occurrence"),
+	"EXC-011": (BLOCKING, "Salary changes inside the payroll period"),
+	"EXC-012": (BLOCKING, "Already processed in this period"),
+	"EXC-013": (BLOCKING, "Salary Profile has no base salary"),
+	"EXC-014": (WARNING, "Working calendar configuration"),
 	# Variance / anomaly detection — warnings by design, never blockers.
-	"EXC-020": (WARNING, _("Gross salary variance")),
-	"EXC-021": (WARNING, _("Net salary variance")),
-	"EXC-022": (WARNING, _("IRT dropped to zero")),
-	"EXC-023": (WARNING, _("Social Security dropped to zero")),
-	"EXC-024": (WARNING, _("First payroll for this employee")),
-	"EXC-025": (WARNING, _("Employee missing from this payroll")),
+	"EXC-020": (WARNING, "Gross salary variance"),
+	"EXC-021": (WARNING, "Net salary variance"),
+	"EXC-022": (WARNING, "IRT dropped to zero"),
+	"EXC-023": (WARNING, "Social Security dropped to zero"),
+	"EXC-024": (WARNING, "First payroll for this employee"),
+	"EXC-025": (WARNING, "Employee missing from this payroll"),
+	"EXC-026": (WARNING, "Suspended employee — suspension is not prorated"),
 }
 
 DEFAULT_VARIANCE_THRESHOLD = 25.0
@@ -61,6 +64,10 @@ DEFAULT_VARIANCE_THRESHOLD = 25.0
 
 def _exception(code, employee=None, employee_name=None, message=None):
 	severity, label = EXCEPTIONS[code]
+	# Translated HERE. The EXCEPTIONS table is a module-level constant, and a _() in it
+	# would run once at import and freeze every readiness message in whatever language
+	# the worker booted in.
+	label = _(label)
 	return {
 		"code": code,
 		"severity": severity,
@@ -88,27 +95,33 @@ def configuration_status(company, on_date=None):
 	s = frappe.get_cached_doc("Isoft HR Settings")
 	items = []
 
-	def add(key, label, value, ok, hint=None, severity=BLOCKING):
+	def add(key, label, value, ok, hint=None, severity=BLOCKING, required=None, where=None):
 		items.append({
 			"key": key, "label": label, "value": value,
 			"status": "Configured" if ok else ("Missing" if not value else "Invalid"),
 			"ok": bool(ok), "severity": severity, "hint": hint,
+			"required": required, "where": where,
 		})
+
+	from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
 
 	add("payroll_payable_account", _("Payroll Payable Account"), s.get("payroll_payable_account"),
 	    _account_exists(s.get("payroll_payable_account")),
-	    _("Required to post the payroll accrual."))
+	    _("Required to post the payroll accrual."), required=_("Liability"), where=pa.WHERE_PAYABLE)
 	add("salary_payment_account", _("Salary Payment Account (Bank/Cash)"),
 	    s.get("salary_payment_account"), _account_exists(s.get("salary_payment_account")),
-	    _("Required to post the salary payment."))
+	    _("Required to post the salary payment."), required=_("Asset or Liability"), where=pa.WHERE_BANK)
 
 	# One row per component that needs a GL account, so a half-mapped chart is visible
-	# before posting fails on the first employee.
+	# before posting fails on the first employee. Each row says what the account must be
+	# and where it is set, so the blocker reads as an instruction (F-04).
 	mapped = {r.abbr: r.account for r in s.get("component_accounts") or [] if r.account}
 	for comp in engine.journal_components():
 		account = mapped.get(comp["abbr"])
-		add("account:" + comp["abbr"], _("Account — {0}").format(comp["component"]),
-		    account, _account_exists(account), _("Settings → Account per Component."))
+		req = pa.requirement(comp["abbr"])
+		add("account:" + comp["abbr"], _("Account — {0}").format(req["label"]),
+		    account, _account_exists(account), _("Settings → Account per Component."),
+		    required=req["required"], where=req["where"])
 
 	cost_center = frappe.db.get_value("Company", company, "cost_center") if company else None
 	add("cost_center", _("Default Cost Center"), cost_center, bool(cost_center),
@@ -136,13 +149,97 @@ def configuration_status(company, on_date=None):
 	                               flt(rates.get("ss_employer_rate"))),
 	    rates_ok, _("Create an Isoft Statutory Rate effective for this period."))
 
+	# --- the two statutory subsidies ----------------------------------------- #
+	# Lei n.º 12/23 artigo 238.º makes both of these entitlements, so a run in the month
+	# one of them falls due must say out loud that it is switched off. Otherwise the only
+	# evidence is a December payroll that is silently 50% of a base lighter per employee.
+	pay_month = s.get("natal_payment_month") or "December"
+	if pay_month in engine.MONTHS and on_date.month == engine.MONTHS.index(pay_month) + 1:
+		natal_on = engine.component_enabled(s, "SNA")
+		add("enable_natal", _("Subsídio de Natal (13.º) for this period"),
+		    _("Enabled — {0}% of base").format(flt(s.get("natal_rate")))
+		    if natal_on else _("SWITCHED OFF"),
+		    natal_on,
+		    _("This payroll period ends in the configured Natal payment month, but the "
+		      "component is switched off in Settings → Enabled Components, so no 13th "
+		      "month will be proposed for anybody. Artigo 238.º n.º 1 al. b) makes it an "
+		      "entitlement of at least 50% of the salário-base."),
+		    severity=WARNING)
+
+	# --- suspension: a gap in the data model, stated rather than hidden -------- #
+	# Artigo 238.º n.º 3 prorates the supplement for a year interrupted by suspension as
+	# well as one shortened by admission or termination. This application stores
+	# suspension as an Employee status with no dates and keeps no history of it (Employee
+	# carries no Version rows at all), so there is nothing to prorate against — not for
+	# the current year and not retrospectively. That is a data-model gap and it is NOT
+	# solved by guessing. The row is raised only where the company actually has a
+	# suspended employee, so it stays a finding rather than furniture.
+	# LEGAL VERIFICATION REQUIRED: whether a given suspension interrupts "months of
+	# service" at all depends on the kind of suspension, which is a legal determination.
+	suspended = frappe.db.count("Employee", {"company": company, "status": "Suspended"}) \
+		if company else 0
+	if suspended:
+		add("suspension_proration", _("Suspension proration"),
+		    _("{0} suspended employee(s)").format(suspended), False,
+		    _("Suspension is recorded as a status with no start or end date, so no "
+		      "subsidy is reduced in proportion to it. Artigo 238.º n.º 3 makes the "
+		      "Christmas supplement proportional for an interrupted year. Adjust the "
+		      "affected employees by hand: the amount is editable per employee in the "
+		      "payroll preview, and a Final Settlement has a Supplement Months override."),
+		    severity=WARNING)
+
+	# --- settings that change pay silently when unset ------------------------- #
+	# A missing value here does not stop payroll; it makes payroll use a default nobody
+	# chose. That is worse than an error, because nothing on screen says it happened.
+	basis = s.get("working_days_basis") or "Auto (Holiday List)"
+	add("working_days_basis", _("Working Days Basis"), basis, True,
+	    _("Decides what Total Working Days counts and how absences are priced."),
+	    severity=WARNING)
+
+	daily_hours = flt(s.get("standard_daily_hours"))
+	add("standard_daily_hours", _("Standard Daily Hours"),
+	    (str(daily_hours) if daily_hours else _("not set — using 8")),
+	    bool(daily_hours),
+	    _("Unset. Payroll is falling back to 8 hours a day. This divisor converts "
+	      "Timesheet hours into Paid Days and sets the hourly value used for overtime "
+	      "and on the payslip, so leaving it unset quietly assumes an 8-hour day."),
+	    severity=WARNING)
+
+	if basis == "Standard (Fixed)":
+		fixed = flt(s.get("standard_working_days"))
+		add("standard_working_days", _("Standard Working Days"),
+		    (str(fixed) if fixed else _("not set — using 30")), bool(fixed),
+		    _("Unset while the basis is Standard (Fixed). Payroll is falling back to 30 "
+		      "days, which changes what a day of absence costs."), severity=WARNING)
+
+	# The holiday list is what removes public holidays from the working-day count. With
+	# none, every holiday is counted as a working day.
+	if basis != "Standard (Fixed)":
+		holiday_list = (frappe.db.get_value("Company", company, "default_holiday_list")
+		                if company else None)
+		add("default_holiday_list", _("Default Holiday List"), holiday_list,
+		    bool(holiday_list),
+		    _("No holiday list on the Company, so public holidays are being counted as "
+		      "ordinary working days in Total Working Days."), severity=WARNING)
+		if holiday_list:
+			covered = frappe.db.sql(
+				"""select count(*) from `tabHoliday` where parent = %s
+				and holiday_date between %s and %s""",
+				(holiday_list, getdate(on_date).replace(month=1, day=1),
+				 getdate(on_date).replace(month=12, day=31)))[0][0]
+			add("holiday_list_year", _("Holidays Loaded for {0}").format(getdate(on_date).year),
+			    str(covered), bool(covered),
+			    _("The holiday list has no dates in this year, so no holiday will be "
+			      "excluded from the working-day count."), severity=WARNING)
+
 	return items
 
 
 # --------------------------------------------------------------------------- #
 # Employee readiness
 # --------------------------------------------------------------------------- #
-def _eligible_employees(company, start, end, department=None, branch=None, designation=None):
+def _eligible_employees(company, start, end, department=None, branch=None, designation=None,
+                        employees=None):
 	filters = {"status": "Active"}
 	if company:
 		filters["company"] = company
@@ -150,6 +247,10 @@ def _eligible_employees(company, start, end, department=None, branch=None, desig
 	                     ("designation", designation)):
 		if value:
 			filters[field] = value
+	if employees is not None:
+		# A payroll run's own employees: the approval gate asks about them alone, so an
+		# 80-employee run is not assessed against the whole company on every approval.
+		filters["name"] = ("in", list(employees) or [""])
 	return frappe.get_all(
 		"Employee", filters=filters,
 		fields=["name", "employee_name", "department", "designation", "date_of_joining",
@@ -217,7 +318,7 @@ def _ever_paid(company):
 
 
 def evaluate(company, start_date, end_date, department=None, branch=None, designation=None,
-             validate_attendance=0, based_on_timesheet=0, include_variance=True):
+             validate_attendance=0, based_on_timesheet=0, include_variance=True, employees=None):
 	"""Full readiness assessment for a payroll period.
 
 	Returns counts, the configuration checklist and one entry per detected exception.
@@ -242,7 +343,8 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 	config = configuration_status(company, on_date=end)
 	config_blocking = [c for c in config if not c["ok"] and c["severity"] == BLOCKING]
 
-	employees = _eligible_employees(company, start, end, department, branch, designation)
+	employees = _eligible_employees(company, start, end, department, branch, designation,
+	                                employees=employees)
 	occurrences = _pending_occurrences(company, start, end)
 	previous, prev_period = ({}, (None, None))
 	ever_paid = set()
@@ -273,6 +375,18 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 				blockers.append(_exception(
 					"EXC-001", e.name, e.employee_name,
 					_("No Salary Profile is effective on {0}.").format(end)))
+			elif flt(profile.base) <= 0:
+				# A profile that exists but carries no base pays nothing, and a slip worth
+				# nothing cannot be posted: the ledger refuses a voucher whose debit and
+				# credit are both zero, and because that refusal aborts the whole batch it
+				# takes the other employees' posting and payment down with it. Caught here,
+				# while the run is still a draft — once the payroll is Approved the slip
+				# can no longer be corrected without cancelling the approval.
+				blockers.append(_exception(
+					"EXC-013", e.name, e.employee_name,
+					_("Salary Profile {0} has a base salary of zero, so this employee's "
+					  "slip would be worth nothing and could not be posted.")
+					.format(profile.name)))
 
 		if profile and not blockers:
 			try:
@@ -320,6 +434,13 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 			if cint(existing.docstatus) != 1:
 				exceptions[-1]["severity"] = WARNING
 
+		# Which calendar this employee will actually be paid against. A warning, never a
+		# blocker: the payroll is calculable either way, and the question HR needs
+		# answered is not "is something wrong" but "which Holiday List did it use" —
+		# because the wrong one silently pays public holidays as ordinary working days.
+		for msg in _calendar_warnings(e, start, end):
+			exceptions.append(_exception("EXC-014", e.name, e.employee_name, msg))
+
 		# Payment and compliance data — never blockers for calculation.
 		if not (e.get("custom_iban") or "").strip():
 			exceptions.append(_exception(
@@ -350,11 +471,24 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 		for emp, row in previous.items():
 			if emp in seen:
 				continue
-			name = frappe.db.get_value("Employee", emp, "employee_name") or emp
+			row = frappe.db.get_value("Employee", emp, ["employee_name", "status"],
+			                          as_dict=True) or frappe._dict()
+			name = row.get("employee_name") or emp
+			# Naming the status matters: "not eligible" is the same sentence for somebody
+			# who left, somebody who was made inactive and somebody who was suspended, and
+			# only one of those three is reversible.
 			exceptions.append(_exception(
 				"EXC-025", emp, name,
-				_("Paid in the previous period ({0} to {1}) but not eligible in this one.").format(
-					prev_period[0], prev_period[1])))
+				_("Paid in the previous period ({0} to {1}) but not eligible in this one "
+				  "— the employee is {2}.").format(
+					prev_period[0], prev_period[1], _(row.get("status") or "not Active"))))
+			if row.get("status") == "Suspended":
+				exceptions.append(_exception(
+					"EXC-026", emp, name,
+					_("Suspended, so no salary is calculated for this period. The "
+					  "application records suspension as a status only, with no start or "
+					  "end date, so no subsidy can be reduced in proportion to it — any "
+					  "adjustment owed under artigo 238.º n.º 3 has to be entered by hand.")))
 
 	for exc in exceptions:
 		if exc["severity"] == WARNING:
@@ -364,10 +498,15 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 
 	if config_blocking:
 		for item in config_blocking:
-			exceptions.append(_exception(
-				"EXC-006" if item["key"].startswith("account") or "account" in item["key"]
-				else "EXC-005", None, None,
-				_("{0}: {1}").format(item["label"], item["status"])))
+			is_account = item["key"].startswith("account") or "account" in item["key"]
+			if is_account:
+				message = _("BLOCKING — Missing payroll account mapping: {0} — {1} — required "
+				            "account type: {2} — configure in {3}").format(
+					item["label"].replace(_("Account — "), ""), item["status"],
+					item.get("required") or "?", item.get("where") or pa.WHERE_COMPONENTS)
+			else:
+				message = _("{0}: {1}").format(item["label"], item["status"])
+			exceptions.append(_exception("EXC-006" if is_account else "EXC-005", None, None, message))
 
 	by_code = {}
 	for exc in exceptions:
@@ -390,6 +529,52 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 		"exceptions": exceptions,
 		"summary": sorted(by_code.values(), key=lambda r: r["code"]),
 	}
+
+
+
+def _calendar_warnings(employee, start, end):
+	"""Anything HR should know about the calendar this employee is being paid against.
+
+	Always names the list that will ACTUALLY be used. A warning saying only "the holiday
+	list is out of date" leaves the reader unable to tell whether the payroll in front of
+	them is right, which is the question they are actually asking.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.services import work_calendar
+
+	info = work_calendar.diagnose(employee.name, start, end)
+	out = []
+	resolved = info["resolved_holiday_list"]
+
+	if not resolved:
+		out.append(_("No Holiday List resolves for this employee: no Shift Type list, no "
+		             "Employee Holiday List and no Company default. Public holidays will "
+		             "be paid as ordinary working days."))
+		return out
+
+	if not info["any_covers"]:
+		out.append(_("No configured Holiday List covers this payroll period — {0} (from "
+		             "the {1}) runs {2} to {3}. No public holiday will be deducted for "
+		             "this employee.")
+		           .format(resolved, info["source"], info["from_date"], info["to_date"]))
+		return out
+
+	for skipped in info["bypassed"]:
+		if skipped["expired"]:
+			out.append(_("The {0} record still points at {1}, which ran {2} to {3} and "
+			             "does not cover this period. Paid against {4} instead, from the "
+			             "{5}.").format(skipped["source"], skipped["list"],
+			                            skipped["from_date"], skipped["to_date"],
+			                            resolved, info["source"]))
+		else:
+			out.append(_("The {0} record says {1}, but {2} (from the {3}) takes "
+			             "precedence and is what this payroll uses.")
+			           .format(skipped["source"], skipped["list"], resolved,
+			                   info["source"]))
+	# Deliberately NOT warned about: a list that covers the period and contains no
+	# holiday in it. August has no Angolan public holiday and neither do several other
+	# months; flagging every one of them would fire this code at everybody, every quiet
+	# month, and teach HR to scroll past it — including on the months that matter.
+	return out
 
 
 def _variance_exceptions(employee, result, previous, threshold, ever_paid=False):

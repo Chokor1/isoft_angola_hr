@@ -12,11 +12,50 @@ from isoft_angola_hr.isoft_angola_hr.services import advances
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 
 
+#: What was asked for and what was approved. Once the request has left the requester's
+#: hands these are the terms somebody signed off, so editing them is editing an approved
+#: decision — an approval bypass that needs no approve permission at all.
+TERMS_FIELDS = ("employee", "requested_amount", "approved_amount", "installments",
+                "installment_amount", "recovery_start_date")
+
+
 class IsoftSalaryAdvance(Document):
 	def validate(self):
 		self.set_defaults()
 		self.validate_amounts()
 		self.validate_no_competing_advance()
+		self.validate_terms_not_rewritten()
+
+	def validate_terms_not_rewritten(self):
+		"""Stop the approved terms being edited around the workflow.
+
+		Write access to this DocType is deliberately wider than approve access: HR records
+		the request, somebody else approves it. Without this, anyone who can save the form
+		could raise an approved advance after the fact, which is the approval control
+		defeated by an ordinary edit rather than by a missing permission.
+		"""
+		if self.is_new():
+			return
+		before = self.get_doc_before_save()
+		if not before:
+			return
+		if before.status in (advances.DRAFT, advances.REJECTED):
+			return                      # still the requester's to edit
+
+		changed = [f for f in TERMS_FIELDS if str(before.get(f) or "") != str(self.get(f) or "")]
+		if not changed:
+			return
+
+		labels = ", ".join(self.meta.get_label(f) or f for f in changed)
+		if before.status in advances.OPEN_STATES or before.status == advances.SETTLED:
+			# The money has already moved; correcting it is a new document, not an edit.
+			frappe.throw(_("{0} cannot be changed once the advance has been disbursed "
+			               "({1}). Cancel it and raise a new advance instead.")
+			             .format(labels, _(before.status)))
+		if not perms.can(perms.ADVANCE_APPROVE):
+			frappe.throw(_("{0} cannot be changed while the advance is {1}. Only an "
+			               "approver may adjust the terms being approved.")
+			             .format(labels, _(before.status)))
 
 	def set_defaults(self):
 		if not self.status:

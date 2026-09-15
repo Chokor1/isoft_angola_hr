@@ -238,6 +238,49 @@ def validate_export(entry_name, adapter=None):
 		                 "message": _("Payroll is not released for payment: {0}").format(
 			                 str(exc)[:160])})
 
+	# The four things that must be true of the RUN before any row is looked at: it was
+	# approved by somebody, Finance released it, the accrual is in the ledger, and nobody
+	# in it has been paid already. Each is checked from the record — the approval stamp,
+	# the release stamp, the vouchers — never from the status word alone.
+	if not (entry.get("approved_by") and entry.get("approval_fingerprint")):
+		problems.append({"code": "BNK-010", "employee": None,
+		                 "message": _("The payroll has not been approved: no approval is "
+		                              "recorded on it.")})
+	if not entry.get("payment_authorized_by"):
+		problems.append({"code": "BNK-011", "employee": None,
+		                 "message": _("Payment has not been approved: nobody has released "
+		                              "this payroll for payment.")})
+	unposted = [(r["employee_name"] or r["employee"]) for r in wf.slip_rows(entry)
+	            if cint(r["docstatus"]) == 1 and not (
+		            r.get("journal_entry")
+		            and cint(frappe.db.get_value("Journal Entry", r["journal_entry"], "docstatus")) == 1)]
+	if unposted:
+		problems.append({"code": "BNK-012", "employee": None,
+		                 "message": _("The payroll accounting has not been posted for {0} "
+		                              "employee(s): {1}. The Journal Entry must exist before "
+		                              "the bank file is generated.").format(
+			                 len(unposted), ", ".join(unposted[:8]))})
+	already_paid = [(r["employee_name"] or r["employee"]) for r in wf.slip_rows(entry)
+	                if cint(r["docstatus"]) == 1 and r.get("payment_entry")
+	                and cint(frappe.db.get_value("Journal Entry", r["payment_entry"], "docstatus")) == 1]
+	if already_paid:
+		problems.append({"code": "BNK-014", "employee": None,
+		                 "message": _("{0} employee(s) in this run already have a submitted "
+		                              "payment: {1}. A new bank file would pay them twice.").format(
+			                 len(already_paid), ", ".join(already_paid[:8]))})
+	sent = frappe.get_all("Isoft Bank Export",
+	                      filters={"payroll_entry": entry.name,
+	                               "status": ("in", ("Submitted to Bank", "Executed"))},
+	                      fields=["name", "status", "bank_reference", "total_amount"],
+	                      order_by="version desc", limit=1)
+	if sent:
+		problems.append({"code": "BNK-015", "employee": None,
+		                 "message": _("A bank file for this payroll was already {0} (export {1}, "
+		                              "bank reference {2}, total {3}). Generating another would "
+		                              "be a duplicate payment.").format(
+			                 _(sent[0].status).lower(), sent[0].name, sent[0].bank_reference or "—",
+			                 flt(sent[0].total_amount, 2))})
+
 	rows, row_problems = collect(entry)
 	problems.extend(row_problems)
 
@@ -258,6 +301,29 @@ def validate_export(entry_name, adapter=None):
 		                 "message": _("The file totals {0} but the payroll totals {1}. "
 		                              "{2} employee(s) were excluded.").format(
 			                 file_total, payroll_total, len(row_problems))})
+
+	# The file must also equal what the ledger says is owed: the net pay credited to the
+	# payroll payable by the run's own accrual vouchers. A slip edited after posting, or a
+	# voucher cancelled without the slip noticing, shows up here as a difference.
+	from isoft_angola_hr.isoft_angola_hr.services import payroll_reconciliation as recon
+	accruals = sorted({r["journal_entry"] for r in wf.slip_rows(entry)
+	                   if cint(r["docstatus"]) == 1 and r.get("journal_entry")
+	                   and cint(frappe.db.get_value("Journal Entry", r["journal_entry"], "docstatus")) == 1})
+	if rows and accruals:
+		settings = frappe.get_cached_doc("Isoft HR Settings")
+		payables = {settings.get("payroll_payable_account")}
+		if frappe.get_meta("Employee").has_field("custom_payroll_payable_account"):
+			for r in rows:
+				override = frappe.db.get_value("Employee", r["employee"], "custom_payroll_payable_account")
+				if override:
+					payables.add(override)
+		booked = flt(sum(recon._gl_balance(accruals, p, "credit") for p in payables if p), 2)
+		if abs(booked - payroll_total) > 0.01:
+			problems.append({"code": "BNK-013", "employee": None,
+			                 "message": _("The payroll payable booked in the ledger is {0} but "
+			                              "the payroll totals {1}. The accounting must match "
+			                              "the payroll before it is paid.").format(
+				                 booked, payroll_total)})
 
 	if not rows and not problems:
 		problems.append({"code": "BNK-008", "employee": None,
@@ -333,6 +399,9 @@ def record_bank_response(name, bank_reference, status="Submitted to Bank",
 	perms.require(perms.PAYROLL_CONFIRM_PAYMENT)
 	doc = frappe.get_doc("Isoft Bank Export", name)
 	perms.require_company(doc.company)
+	# Confirming what the bank did is Finance work: never the preparer of the run.
+	from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+	wf.check_actor(frappe.get_doc("Isoft Payroll Entry", doc.payroll_entry), wf.PAY)
 	if status not in ("Submitted to Bank", "Executed", "Rejected"):
 		frappe.throw(_("Unknown status {0}.").format(status))
 	if status != "Rejected" and not (bank_reference or "").strip():

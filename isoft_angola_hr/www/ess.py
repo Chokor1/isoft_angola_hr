@@ -32,6 +32,6 @@ def get_context(context):
 	# a newsletter sign-up and a product footer have no place in an
 	# employee's payslip screen.
 	context.body_class = "isoft-ss-page"
-	context.title = _("Área do Colaborador")
+	context.title = _("Employee Self-Service")
 	context.parents = []
 	return context

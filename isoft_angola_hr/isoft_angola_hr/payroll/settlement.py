@@ -41,7 +41,7 @@ DESIGN RULES
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, getdate
+from frappe.utils import add_days, cint, flt, getdate
 
 from isoft_angola_hr.isoft_angola_hr.doctype.irt_table.irt_table import resolve_irt
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_statutory_rate.isoft_statutory_rate import (
@@ -229,6 +229,123 @@ def _salary_due(inp, flags):
 # --------------------------------------------------------------------------- #
 # Annual leave — artigo 212.º priced on the artigo 213.º base
 # --------------------------------------------------------------------------- #
+def collect_unpaid_overtime(employee, company, base, period_start, termination_date):
+	"""Approved overtime that has not yet been paid, up to the termination date.
+
+	NOT pure and deliberately outside :func:`compute` — it reads Attendance and the
+	payroll history. :meth:`IsoftFinalSettlement.inputs` calls it and passes the result in,
+	so ``compute`` stays a pure function of its inputs.
+
+	"Approved" means a SUBMITTED Attendance record carrying overtime hours: exactly the
+	same source the monthly payroll uses. "Unpaid" means dated after the last submitted
+	salary slip, because that slip already paid everything up to its end date. Overtime is
+	never inferred from days-worked against a divisor — that arithmetic says nothing about
+	whether anybody actually worked extra hours, and it is not used here or anywhere else.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
+		attendance_overtime_amount, compute_working_days,
+	)
+
+	settings = frappe.get_cached_doc("Isoft HR Settings")
+	enabled = cint(settings.get("enable_overtime"))
+	multiplier = flt(settings.get("overtime_multiplier")) or 2.0
+	term = getdate(termination_date)
+
+	# Everything the last submitted slip covered is already paid for.
+	last_paid = frappe.db.sql(
+		"""select max(end_date) from `tabIsoft Salary Slip`
+		where employee = %s and docstatus = 1""", employee)[0][0]
+	start = add_days(getdate(last_paid), 1) if last_paid else getdate(period_start or term)
+	if start > term:
+		start = term
+
+	rows = frappe.db.sql(
+		"""select attendance_date, custom_overtime_hours as hours
+		from `tabAttendance`
+		where employee = %s and docstatus = 1
+		  and ifnull(custom_overtime_hours, 0) > 0
+		  and attendance_date between %s and %s
+		order by attendance_date""",
+		(employee, start, term), as_dict=True)
+
+	hours = flt(sum(flt(r.hours) for r in rows), 2)
+	amount = 0.0
+	rate_days = 0.0
+	if hours and enabled:
+		# The daily rate must come from a WHOLE payroll period, never from the unpaid
+		# window. The window can be three days long, and base ÷ 3 would price an hour of
+		# overtime at about eight times a full day's pay. attendance_overtime_amount takes
+		# the rate basis and the hours window as separate arguments precisely so they can
+		# differ: the divisor is the month containing the termination, the rows are the
+		# unpaid window.
+		from isoft_angola_hr.isoft_angola_hr.api import _cycle_period
+
+		p_start, p_end = _cycle_period(term)
+		rate_days, _pay = compute_working_days(employee, p_start, p_end)
+		amount = flt(attendance_overtime_amount(
+			employee, base, rate_days, start, term, multiplier), 2)
+
+	return {
+		"enabled": bool(enabled),
+		"hours": hours,
+		"amount": amount,
+		"multiplier": multiplier,
+		"window_start": str(start),
+		"window_end": str(term),
+		"days": len(rows),
+		# The monthly divisor the hourly value was derived from, so the screen can show it.
+		"rate_working_days": flt(rate_days, 2),
+	}
+
+
+def _overtime_lines(inp, flags):
+	"""The overtime line, or the warning that approved overtime is being left unpaid.
+
+	Pure: everything comes from ``inp["overtime"]``, gathered by
+	:func:`collect_unpaid_overtime`.
+	"""
+	ot = inp.get("overtime") or {}
+	hours = flt(ot.get("hours"))
+	if not hours:
+		return []
+
+	if not ot.get("enabled"):
+		# Never discard it silently: the hours were approved by somebody.
+		flags.append({
+			"code": "OT-DISABLED", "level": "warning",
+			"message": _("Approved overtime exists but overtime processing is disabled. "
+			             "{0} hours were approved between {1} and {2} and are NOT included "
+			             "in this settlement. Enable Horas Extras in Isoft HR Settings, or "
+			             "settle them outside the system deliberately.").format(
+				             _money(hours), ot.get("window_start"), ot.get("window_end"))})
+		return []
+
+	amount = flt(ot.get("amount"))
+	multiplier = flt(ot.get("multiplier")) or 2.0
+	hourly = _r2(amount / (hours * multiplier)) if hours and multiplier else 0.0
+	# The amount is a sum over days, and each day's normal hours come from that day's
+	# shift, so there is no single exact "a × b" for it: a 4-hour Saturday and a 9.5-hour
+	# Tuesday do not share an hourly rate. Printing a rounded average and multiplying it
+	# back would show a total a few cents away from the amount actually paid — the guard
+	# in _check_reconciles catches precisely that. So the readable form is worded, and the
+	# note below says how it was summed.
+	return [_line(
+		SEC_OTHER, _("Overtime (approved, unpaid)"), amount, "company",
+		formula=_("{0} h at an average {1}/h with a ×{2} premium").format(
+			_money(hours), _money(hourly), _money(multiplier)),
+		note=_("{0} hours on {1} day(s) recorded on submitted Attendance between {2} and "
+		       "{3}, unpaid because no submitted salary slip covers that period. Normal "
+		       "hourly value {4} (monthly remuneration over {5} working days), premium "
+		       "×{6}. Each day is priced on its own scheduled hours and the results are "
+		       "summed, so the average shown above is descriptive. Hours come from "
+		       "approved Attendance records only — never from days worked against a "
+		       "divisor.").format(
+			       _money(hours), ot.get("days"), ot.get("window_start"),
+			       ot.get("window_end"), _money(hourly),
+			       _money(ot.get("rate_working_days")), _money(multiplier)),
+		irt=True, inss=True, key="overtime")]
+
+
 def _leave_lines(inp, flags):
 	ent = law.leave_entitlement(
 		inp.get("joining_date"), inp["termination_date"],
@@ -536,6 +653,7 @@ def compute(inputs):
 	lines += supp_lines
 	lines.append(_compensation_line(inp, seniority, flags))
 	lines += _notice_lines(inp, flags)
+	lines += _overtime_lines(inp, flags)
 
 	for extra in (inp.get("other_earnings") or []):
 		if flt(extra.get("amount")):
@@ -580,11 +698,27 @@ def compute(inputs):
 			             _money(irt_gross), _money(inss), _money(irt_base), term),
 		      key="irt"),
 	]
+	# --- IRT-LUMP: the one encoded assumption that has NOT been legally confirmed ----
+	# WHAT IS DONE: every settlement line marked irt_taxable is summed (irt_gross), the
+	# employee social-security contribution is subtracted, and the resulting irt_base is
+	# passed ONCE through resolve_irt() — the monthly IRT table in force on the
+	# termination date.
+	# THE ASSUMPTION: that a termination settlement is taxed as a single month's income.
+	# It is not spread over the months the amounts accrued, and no separate treatment is
+	# applied to the compensation, the leave payments or the annual supplements.
+	# WHY IT MATTERS: the IRT table is progressive, so taxing several months of accrued
+	# entitlement in one month lands it in a higher bracket than spreading it would.
+	# DO NOT change this on an assumption — it needs an Angolan tax opinion. Until then it
+	# is surfaced on every settlement as a verification flag, never silently applied.
 	flags.append({
 		"code": "IRT-LUMP", "level": "verify",
-		"message": _("The IRT table is a monthly table. It has been applied once to the "
-		             "whole taxable settlement. Whether a termination settlement is taxed "
-		             "as a single month or spread has not been verified. ") + MARKER})
+		"message": _("IRT treatment for termination settlement requires legal "
+		             "confirmation. The IRT table is a monthly table and it has been "
+		             "applied once to the whole taxable settlement ({0} taxed on the "
+		             "table effective {1}). Whether a termination settlement is taxed as a "
+		             "single month or spread across the months it accrued has NOT been "
+		             "verified against Angolan tax law. ").format(
+			             _money(irt_base), term) + MARKER})
 
 	# --- other deductions ------------------------------------------------------ #
 	notice_owed = _r2(sum(ln["amount"] for ln in lines if ln["sign"] < 0))

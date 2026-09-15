@@ -35,8 +35,13 @@ COMPONENTS = {
 	"SDT": {"name": "Subsídio de Transporte", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": True},
 	"AF": {"name": "Abono de Família", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": True},
 	# Duodécimos — Angola holiday (férias) and Christmas (Natal) subsidies, accrued
-	# monthly as a % of base. Optional, fully taxable and fully in the SS base.
-	"SFE": {"name": "Subsídio de Férias", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
+	# monthly as a % of base. Optional and fully taxable. They differ on social
+	# security: the vacation supplement is OUT of the contribution base and the
+	# Christmas supplement is IN it, which is why their ss_base flags differ.
+	# The flag on SFE read True while the base computed below has always excluded it —
+	# nothing consumes the flag, so no figure was ever wrong, but the metadata
+	# contradicted the arithmetic and cost one reader an afternoon.
+	"SFE": {"name": "Subsídio de Férias", "kind": "earning", "in_gross": True, "ss_base": False, "prorate": False},
 	"SNA": {"name": "Subsídio de Natal", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"PPD": {"name": "Prémio de Produtividade", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"HEX": {"name": "Horas Extras", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
@@ -146,25 +151,56 @@ MONTHS = ["January", "February", "March", "April", "May", "June",
           "July", "August", "September", "October", "November", "December"]
 
 
+def natal_months(joining_date, period_end):
+	"""Complete months of service in the payment year — artigo 238.º n.º 3.
+
+	The supplement is proportional to **complete** months when a full year of service was
+	not given, and a month is complete only when the whole of it has elapsed. Counting
+	``12 - joining_month + 1`` treats the month of admission as complete whatever day it
+	began on, so an employee admitted on the 15th was credited with a month they had not
+	finished: on a 150,000 base that is 6,250 AKZ too much, and an employee admitted on
+	31 December was paid a twelfth for one day.
+
+	The final-settlement path has always used law.complete_months for exactly this
+	quantity. The two disagreed, so the same statutory supplement came out differently
+	depending on whether the employee was paid in December or terminated in it. They now
+	share one definition.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
+
+	end = getdate(period_end)
+	if not joining_date:
+		return law.MONTHS_PER_YEAR
+	jd = getdate(joining_date)
+	if jd.year > end.year:
+		return 0
+	if jd.year < end.year:
+		return law.MONTHS_PER_YEAR
+	year_start = getdate("{0}-01-01".format(end.year))
+	window_start = jd if jd > year_start else year_start
+	return max(0, min(law.MONTHS_PER_YEAR, law.complete_months(window_start, end)))
+
+
 def default_natal(base, natal_rate, joining_date, period_end, payment_month=None):
-	"""Default 13th-month (Natal) allowance: base * natal_rate%, prorated by the months
-	worked in the period's year (full year -> full; joined mid-year -> months since joining
-	/ 12). Paid only in the payroll period that ENDS in the configured payment month
-	(default December). Zero otherwise. HR can override the returned value per employee."""
+	"""Default 13th-month (Natal) allowance — artigo 238.º n.º 1 al. b) and n.º 3.
+
+	base * natal_rate%, proportional to the COMPLETE months of service in the payment
+	year. Paid only in the payroll period that ENDS in the configured payment month
+	(default December); zero otherwise. HR can override the returned value per employee.
+
+	Suspension is NOT deducted. Artigo 238.º n.º 3 makes the supplement proportional for
+	an interrupted year as well as a partial one, but this application records suspension
+	only as an Employee status with no dates attached, so there is nothing to prorate
+	against. An employee who was suspended during the year is therefore paid as though
+	they were not — see the LEGAL VERIFICATION REQUIRED note in the go-live report.
+	"""
 	end = getdate(period_end) if period_end else None
 	pm = payment_month if payment_month in MONTHS else "December"
 	month_idx = MONTHS.index(pm) + 1
 	if not end or end.month != month_idx:
 		return 0.0
 	full = flt(base) * (flt(natal_rate) or 0.0) / 100.0
-	months = 12
-	if joining_date:
-		jd = getdate(joining_date)
-		if jd.year == end.year:
-			months = max(0, min(12, 12 - jd.month + 1))
-		elif jd.year > end.year:
-			months = 0
-	return flt(full * months / 12.0, 2)
+	return flt(full * natal_months(joining_date, end) / 12.0, 2)
 
 
 def settlement_months(joining_date, termination_date):

@@ -162,7 +162,7 @@ class TestPayrollWorkflow(ControlFixture):
 		frappe.set_user(self.users["finance"])
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.make_bulk_journal_entry(entry.name)
-		self.assertIn("não foi aprovado", str(cm.exception))
+		self.assertIn("has not been approved yet", str(cm.exception))
 
 	def test_approved_cannot_be_approved_again(self):
 		entry = self.approved_entry()
@@ -222,7 +222,7 @@ class TestSegregationOfDuties(ControlFixture):
 		api.payroll_action(entry.name, wf.SUBMIT_FOR_APPROVAL)
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.payroll_action(entry.name, wf.APPROVE)
-		self.assertIn("próprio", str(cm.exception))
+		self.assertIn("payroll you prepared", str(cm.exception))
 		frappe.set_user("Administrator")
 		entry.reload()
 		self.assertEqual(entry.status, wf.PENDING_APPROVAL, "the payroll must stay unapproved")
@@ -248,7 +248,7 @@ class TestSegregationOfDuties(ControlFixture):
 		frappe.set_user(self.users["manager"])
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.payroll_action(entry.name, wf.RELEASE_FOR_PAYMENT)
-		self.assertIn("aprovou", str(cm.exception))
+		self.assertIn("payroll you approved", str(cm.exception))
 
 	def test_segregation_can_be_relaxed_by_configuration(self):
 		"""A company too small to separate the duties can switch the rule off — and the
@@ -295,7 +295,7 @@ class TestApprovalIntegrity(ControlFixture):
 		with self.assertRaises(frappe.ValidationError) as cm:
 			slip.save(ignore_permissions=True)
 		message = frappe.utils.strip_html(str(cm.exception))
-		self.assertIn("não pode ser alterado", message)
+		self.assertIn("cannot be changed", message)
 		self.assertIn(entry.name, message)
 
 	def test_posting_is_refused_when_the_numbers_moved_after_approval(self):
@@ -308,7 +308,7 @@ class TestApprovalIntegrity(ControlFixture):
 		frappe.set_user(self.users["finance"])
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.make_bulk_journal_entry(entry.name)
-		self.assertIn("alterado depois da aprovação", str(cm.exception))
+		self.assertIn("changed after it was approved", str(cm.exception))
 
 	def posted_entry_prep(self):
 		"""Approved, slips submitted, nothing posted yet."""
@@ -352,12 +352,11 @@ class TestDuplicateProtection(ControlFixture):
 		# A second, independent slip for the same employee and period — the route a
 		# second payroll run (or a manual slip) would take.
 		with self.assertRaises(frappe.ValidationError) as cm:
-			frappe.get_doc({
-				"doctype": "Isoft Salary Slip", "employee": self.employee.name,
-				"company": self.company, "posting_date": self.end,
+			self.insert_slip({
+				"employee": self.employee.name, "posting_date": self.end,
 				"start_date": add_days(self.start, 1), "end_date": self.end,
 				"salary_profile": self.profile.name,
-			}).insert(ignore_permissions=True)
+			}, submit=False)
 		self.assertIn("already has a submitted Salary Slip", str(cm.exception))
 
 
@@ -546,21 +545,34 @@ class TestSalarySlipAmendment(ControlFixture):
 		slip.reload()
 		slip.cancel()
 
+		# An amendment stays inside its run: a slip with no Payroll Entry can no longer be
+		# created at all (F-02), and the cancelled run cannot approve it.
+		detached = frappe.copy_doc(slip)
+		detached.amended_from = slip.name
+		detached.docstatus = 0
+		detached.payroll_entry = None
+		with self.assertRaises(frappe.PermissionError):
+			detached.insert(ignore_permissions=True)
+
 		amended = frappe.copy_doc(slip)
 		amended.amended_from = slip.name
 		amended.docstatus = 0
-		amended.payroll_entry = None
 		amended.productivity_bonus = 10000
 		amended.insert(ignore_permissions=True)
 
 		self.assertNotEqual(amended.name, slip.name, "the amendment needs its own name")
 		self.assertEqual(amended.name, slip.name + "-1")
 		self.assertEqual(amended.amended_from, slip.name)
+		self.assertEqual(amended.payroll_entry, entry.name)
 		self.assertEqual(frappe.db.get_value("Isoft Salary Slip", slip.name, "docstatus"), 2)
-
-		amended.submit()
-		self.assertEqual(amended.docstatus, 1)
 		self.assertAlmostEqual(flt(amended.gross_pay), flt(slip.gross_pay) + 10000, places=2)
+
+		# The run was cancelled, so nothing in it is approved: the corrected slip has to
+		# go through a new run — it cannot be submitted on its own.
+		with self.assertRaises(frappe.ValidationError) as cm:
+			amended.submit()
+		self.assertIn("has not been approved", str(cm.exception))
+		self.assertEqual(frappe.db.get_value("Isoft Salary Slip", amended.name, "docstatus"), 0)
 
 	def test_amendment_replaces_the_original_in_its_payroll_entry(self):
 		entry = self.calculated_entry()

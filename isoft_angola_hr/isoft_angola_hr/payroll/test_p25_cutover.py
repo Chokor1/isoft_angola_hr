@@ -215,7 +215,11 @@ class TestProductionReadiness(ControlFixture):
 		before = self._check(pr.get_production_readiness(self.company), "orphan_slips")
 		self.assertEqual(before["status"], pr.READY)
 
-		self.make_slip()          # standalone: no payroll_entry
+		# A slip can no longer be created outside a run (audit F-02), so the only orphan
+		# left to report is a legacy one: simulate it the way only SQL can.
+		slip = self.make_slip()
+		frappe.db.set_value("Isoft Salary Slip", slip.name, "payroll_entry", None,
+		                    update_modified=False)
 		after = self._check(pr.get_production_readiness(self.company), "orphan_slips")
 		self.assertEqual(after["status"], pr.WARNING)
 		self.assertEqual(after["count"], 1)
@@ -312,7 +316,7 @@ class TestReconciliationAndClosure(ControlFixture):
 		entry.reload()
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.payroll_action(entry.name, wf.CLOSE)
-		self.assertIn("reconcilia", str(cm.exception))
+		self.assertIn("does not reconcile with the ledger", str(cm.exception))
 
 	def test_closing_is_refused_while_accounting_is_incomplete(self):
 		entry = self.approved_entry()
@@ -323,7 +327,7 @@ class TestReconciliationAndClosure(ControlFixture):
 		entry.reload()
 		with self.assertRaises(frappe.ValidationError) as cm:
 			api.payroll_action(entry.name, wf.CLOSE)
-		self.assertIn("contabilizados", str(cm.exception))
+		self.assertIn("have not been posted to the ledger", str(cm.exception))
 
 	def test_a_complete_payroll_closes(self):
 		entry = self._paid_entry()

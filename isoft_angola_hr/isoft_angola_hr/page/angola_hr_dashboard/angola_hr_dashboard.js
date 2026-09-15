@@ -55,6 +55,7 @@ const HR_METHODS = new Set([
 	"probations_due", "create_contract", "contract_action", "renew_contract",
 	"probation_decision", "list_salary_changes", "create_salary_change",
 	"salary_change_action", "list_advances", "create_advance", "advance_action",
+	"payroll_basis",
 	"bank_change_action", "list_bank_change_requests",
 	// Phase 4
 	"bulk_candidates", "bulk_contract_preview", "bulk_contract_execute",
@@ -297,8 +298,35 @@ class AngolaHR {
 		// Bumped by every render; see call(). Starts at 0 so the first fetch is current.
 		this._gen = 0;
 		this.state = { company: null, companies: [], currency: "AOA", view: "overview" };
+		this.guardRejections();
 		this.build();
 		this.boot();
+	}
+
+	/* Stop reporting, as an unhandled error, a refusal we have already put on the screen.
+	 *
+	 * Opening a screen a role may not use — Finance on Contracts, a Payroll Manager on
+	 * Employee Documents — is refused by the server with 403, which is correct and is
+	 * exactly what the permission model is for. renderCallFailure catches it and renders
+	 * "You do not have permission for this screen", so the USER is properly informed.
+	 *
+	 * The browser was not. Views are written `Promise.all([this.call(a), this.call(b)])
+	 * .then(render)`, and Promise.all builds a NEW promise that rejects when any input
+	 * does; nothing catches that one, so every such refusal logged an unhandled
+	 * rejection. Twenty screens across four roles produced sixteen console errors for
+	 * behaviour that was entirely correct — noise of exactly the kind that hides a real
+	 * error, and which made an automated browser sweep report a working application as
+	 * broken.
+	 *
+	 * Only failures renderCallFailure has already reported are silenced, and only those:
+	 * anything else still reaches the console, which is the whole point of the console. */
+	guardRejections() {
+		if (window.__ahrRejectionGuard) return;
+		window.__ahrRejectionGuard = true;
+		window.addEventListener("unhandledrejection", (e) => {
+			const r = e && e.reason;
+			if (r && typeof r === "object" && r.__ahr_reported) e.preventDefault();
+		});
 	}
 
 	/* Every screen fetches through here, and every fetch is async, so a slow response
@@ -341,17 +369,87 @@ class AngolaHR {
 		// itself instead of the data, and every view would silently render its empty
 		// state. Wrapping from the outside keeps the result a real Promise, so .then()
 		// and Promise.all() both behave.
-		return new Promise((resolve, reject) => {
+		const p = new Promise((resolve, reject) => {
 			frappe.call({ method: base + method, args }).then(
 				(r) => {
 					if (gen === this._gen) resolve(r.message);
 				},
 				(err) => {
-					if (gen === this._gen) reject(err);
+					if (gen === this._gen) {
+						this.renderCallFailure(err);
+						reject(err);
+					}
 				}
 			);
 		});
+		// Every rejection is already dealt with: renderCallFailure puts the reason on
+		// the screen, and Frappe shows its own dialog. But most of the 140 call sites
+		// are written `this.call(...).then(render)` with no rejection branch, so the
+		// rejection reached nobody and the browser logged an unhandledrejection for it.
+		// A role opening a screen it may not use — Finance on Contracts, say — produced
+		// a console error for a refusal the application had handled correctly, which is
+		// exactly the noise that hides a real one.
+		//
+		// Attaching the no-op to a BRANCH marks `p` as handled without changing `p`
+		// itself: callers that do have a .catch() still get it, and callers that do not
+		// no longer log. Returning `p.catch(() => {})` instead would swallow the
+		// rejection for everyone.
+		//
+		// It is necessary but NOT sufficient: many views are written
+		// `Promise.all([this.call(a), this.call(b)]).then(render)`, and Promise.all
+		// produces a NEW promise which rejects unhandled even though every input was
+		// handled. That one is caught by the guard in setup().
+		p.catch(() => {});
+		return p;
 	}
+
+	/* A failed first call must not leave the screen spinning.
+	 *
+	 * render() puts a "Loading…" placeholder into .ahr-content and then hands over to
+	 * view_<screen>. Most of those views are written as `this.call(…).then(render)` with
+	 * no rejection branch — 140 call sites, 52 .catch() — so when the call failed the
+	 * placeholder simply stayed, for ever. Frappe still showed its own error dialog, so
+	 * the user was TOLD why (permissions.require produces a precise message naming the
+	 * action and the roles that hold it); but once they dismissed it they were left
+	 * looking at a spinner that would never resolve.
+	 *
+	 * Handled centrally rather than by adding .catch() to every view: the placeholder is
+	 * written in one place, so it can be cleared in one place. This only ever replaces
+	 * the placeholder — if the view has already rendered anything, its own content is
+	 * left completely alone, and the promise is still rejected so existing .catch()
+	 * handlers behave exactly as before. */
+	renderCallFailure(err) {
+		// Marked on the error itself so the unhandled-rejection guard installed in
+		// setup() can tell "already reported to the user" from a genuine unhandled
+		// rejection, without guessing from frappe.last_response.
+		try {
+			if (err && typeof err === "object") err.__ahr_reported = true;
+		} catch (e) {
+			/* frozen object — the guard falls back to its status check */
+		}
+		if (!this.$content || !this.$content.length) return;
+		// Only act while the screen is still the untouched "Loading…" placeholder.
+		if (!this.$content.find(".fa-spinner").length) return;
+		const status = (err && (err.status || err.httpStatus)) || null;
+		const excType = (frappe.last_response || {}).exc_type || "";
+		const denied = status === 403 || excType === "PermissionError";
+		if (denied) {
+			this.$content.html(
+				`<div class="ahr-empty-state">
+					<i class="fa fa-lock" aria-hidden="true"></i>
+					<h4>${__("You do not have permission for this screen")}</h4>
+					<p>${__("Your role does not include the action this screen performs, so there is nothing to show here. The message that just appeared names the action and the roles that hold it — send that to your HR administrator if you believe you should have access.")}</p>
+				</div>`);
+			return;
+		}
+		this.$content.html(
+			`<div class="ahr-empty-state">
+				<i class="fa fa-exclamation-triangle" aria-hidden="true"></i>
+				<h4>${__("This screen could not be loaded")}</h4>
+				<p>${__("The request failed{0}. Use Refresh to try again — if it keeps failing, report it with the error that was shown.", [status ? ` (${status})` : ""])}</p>
+			</div>`);
+	}
+
 	money(v) {
 		return format_currency(flt(v), this.state.currency);
 	}
@@ -1032,7 +1130,14 @@ class AngolaHR {
 	 * button ends up looking dead. This shows whatever the failure actually was, and
 	 * always leaves a trace in the console for a developer. */
 	fail(title, err) {
-		console.error(title, err);            // eslint-disable-line no-console
+		// A permission refusal is not a fault. The server said no, on purpose, and the
+		// screen has already said so to the user; logging it at error level puts a red
+		// entry in the console for behaviour that is exactly correct, which is how a
+		// browser sweep comes to report a working application as broken. Anything that
+		// is NOT a refusal is still logged, because that is what the console is for.
+		const denied = err && (err.status === 403
+			|| (err.responseJSON || {}).exc_type === "PermissionError");
+		if (!denied) console.error(title, err);   // eslint-disable-line no-console
 		const server = err && (err.responseJSON || err._server_messages || err.exc);
 		if (server) return;                   // Frappe has already told the user
 		const message = (err && (err.message || String(err))) || __("Unknown error.");
@@ -1473,7 +1578,11 @@ class AngolaHR {
 					<div><b>${__("Food")}:</b> ${this.money(p.food_allowance)}</div>
 					<div><b>${__("Transport")}:</b> ${this.money(p.transport_allowance)}</div>
 					<div><b>${__("From")}:</b> ${this.d(p.from_date)}</div></div>`
-				: `<div class="ahr-empty">${__("No salary profile")}</div>`;
+				: `<div class="ahr-empty">${__(
+					"No Salary Profile — this employee has no pay on record, so payroll " +
+					"cannot calculate a slip for them. Create one from Salary Profiles, or " +
+					"use Requests &amp; Approvals → Salary Changes for an existing employee."
+				)}</div>`;
 			const slips = this.table(
 				[
 					{ key: "start_date", label: "From", date: true },
@@ -3099,13 +3208,26 @@ class AngolaHR {
 			const $h = $(`<div class="ahr-panel" style="margin-top:14px;"></div>`).appendTo(dialog.body);
 			$h.html(
 				`<h5>${__("Salary History")}</h5>` +
+					`<div class="ahr-note" style="margin-bottom:8px">${__(
+						"Effective From is the date the salary applies from. Recorded is when " +
+						"somebody entered it — often months later. Rows marked " +
+						"(reconstruído) were rebuilt from the version log after the fact and " +
+						"are evidence of what happened, not records made at the time."
+					)}</div>` +
 					this.table(
 						[
-							{ key: "change_date", label: "When", render: (v) => frappe.datetime.str_to_user(v) },
-							{ key: "change_type", label: "Change", render: (v) => __(v || "") },
+							// Effective date first: this is the column that describes the
+							// pay progression. "When" alone made two edits made on one
+							// afternoon look like two salaries.
+							{ key: "from_date", label: "Effective From", date: true },
+							{ key: "to_date", label: "Until", render: (v) => (v ? this.d(v) : __("current")) },
 							{ key: "base", label: "Base", money: true },
 							{ key: "food_allowance", label: "Food", money: true },
 							{ key: "transport_allowance", label: "Transport", money: true },
+							{ key: "currency", label: "Currency" },
+							{ key: "change_type", label: "Change", render: (v) => __(v || "") },
+							{ key: "source", label: "Source", render: (v) => __(v || "") },
+							{ key: "change_date", label: "Recorded", render: (v) => frappe.datetime.str_to_user(v) },
 							{ key: "changed_by", label: "By" },
 						],
 						rows
@@ -3127,9 +3249,36 @@ class AngolaHR {
 		// This is not an authorisation decision in JavaScript: every action still
 		// re-checks on the server. It only stops the screen offering, and silently
 		// attempting, work the user is going to be refused.
-		this.action("payroll_capabilities")
-			.then((caps) => this._renderPayroll(caps || {}))
-			.catch(() => this._renderPayroll({}));
+		// The payroll basis is fetched with the capabilities so the screen can state, in
+		// words, what is actually driving Paid Days this month — HR could not previously
+		// tell whether Timesheets were involved, or that an unset divisor had fallen back
+		// to 8 hours.
+		Promise.all([
+			this.action("payroll_capabilities").catch(() => ({})),
+			this.call("payroll_basis", { company: this.state.company }).catch(() => null),
+		]).then(([caps, basis]) => {
+			this._payrollBasis = basis;
+			this._renderPayroll(caps || {});
+		});
+	}
+
+	payrollBasisPanel() {
+		const b = this._payrollBasis;
+		if (!b) return "";
+		const esc = frappe.utils.escape_html;
+		const warn = (b.warnings || []).map((w) =>
+			`<div style="margin-top:6px;padding:6px 8px;border-left:3px solid #b8860b;background:#fdf6e3">
+				<b>${__("Configuration")}</b> — ${esc(w)}</div>`).join("");
+		return `<div class="ahr-note" style="margin-bottom:12px">
+			<b>${__("Current payroll basis")}:</b> ${esc(b.mode)}<br>
+			<span style="color:#6b7680">${esc(b.working_days_explanation || "")}</span><br>
+			<div style="margin-top:6px">
+				${__("Salary slips")}: ${b.slips_total} &middot;
+				${__("attendance based")}: ${b.slips_attendance_based} &middot;
+				${__("timesheet based")}: ${b.slips_timesheet_based}
+			</div>
+			<div style="margin-top:6px;color:#6b7680">${esc(b.timesheet_formula || "")}</div>
+			${warn}</div>`;
 	}
 
 	_renderPayroll(caps) {
@@ -3140,6 +3289,7 @@ class AngolaHR {
 			.map((c) => `<option value="${esc(c)}" ${c === this.state.company ? "selected" : ""}>${esc(c)}</option>`)
 			.join("");
 		this.$content.html(
+			this.payrollBasisPanel() +
 			(caps.preview ? this.panel(
 				{ title: __("New Payroll Entry"), icon: "fa-play-circle",
 					subtitle: __("Choose the period and scope, check readiness, then prepare the run. Preparing creates draft slips — nothing is paid until the run is approved and posted.") },
@@ -3160,6 +3310,7 @@ class AngolaHR {
 				{ title: __("Payroll runs"), icon: "fa-university",
 					subtitle: __("Open a run below to complete its accounting and payment.") },
 				`<div class="ahr-callout">${__("Preparing a payroll is done by Payroll Officer or HR. Your role completes the accounting: open an approved run below to post it, release it, pay it and close it.")}</div>`)) +
+				`<div class="ahr-finance-gate"></div>` +
 				`<div class="ahr-readiness-wrap"></div>` +
 				`<div class="ahr-preview-wrap"></div>` +
 				this.panel(
@@ -3240,7 +3391,9 @@ class AngolaHR {
 		this.$content.find(".pe-company").on("change", (e) => {
 			loadOpts($(e.currentTarget).val());
 			list();
+			this.loadFinanceGate($(e.currentTarget).val());
 		});
+		this.loadFinanceGate(this.state.company);
 		this.$content.find(".pe-f1, .pe-f2").on("change", list);
 		this.$content.find(".pe-preview").on("click", () => this.runPreview());
 		this.$content.find(".pe-readiness").on("click", () => this.runReadiness());
@@ -3249,6 +3402,46 @@ class AngolaHR {
 		list();
 	}
 
+
+	// ---- Finance approval checklist (READY / BLOCKED) ----
+	/* The nine things Finance must have configured before any payroll can be approved,
+	 * as one answer. HR reads the business sentence ("Employer Social Security expense
+	 * account is not configured. Please contact Finance."); Finance opens the detail.
+	 * Server-authoritative: the same checklist refuses submission and approval. */
+	loadFinanceGate(company, name) {
+		const $slot = this.$content.find(".ahr-finance-gate");
+		if (!$slot.length) return Promise.resolve();
+		return this.action("finance_approval_checklist", { company: company || this.state.company, name })
+			.then((g) => {
+				this._financeGate = g;
+				$slot.html(this.financeGateHtml(g));
+				$slot.find(".fg-toggle").on("click", (e) => {
+					e.preventDefault();
+					$slot.find(".fg-items").toggle();
+				});
+			})
+			.catch(() => $slot.empty());
+	}
+
+	financeGateHtml(g, opts) {
+		if (!g) return "";
+		opts = opts || {};
+		const esc = frappe.utils.escape_html;
+		const blocked = g.status === "BLOCKED";
+		const items = (g.items || []).map((i) =>
+			`<div class="ahr-fin-line ${i.ok ? "ok" : "todo"}">
+				<i class="fa ${i.ok ? "fa-check-circle" : "fa-times-circle"}"></i>
+				<span>${esc(i.label)}${i.ok ? "" : ` — <span class="text-danger">${esc(i.detail)}</span>`}</span></div>`).join("");
+		const reasons = (g.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("");
+		return `<div class="ahr-callout ${blocked ? "err" : "ok"} ahr-finance-gate-box" style="margin-bottom:12px">
+			<div><b>${__("Finance configuration")}:</b>
+				<span class="ahr-badge ${blocked ? "cancelled" : "paid"}">${esc(__(g.status))}</span>
+				${opts.compact ? "" : `<a href="#" class="fg-toggle small" style="margin-left:8px">${__("Finance checklist")}</a>`}</div>
+			<div style="margin-top:4px">${esc(g.headline || "")}</div>
+			${blocked && reasons ? `<ul style="margin:6px 0 0 18px">${reasons}</ul>` : ""}
+			${opts.compact ? "" : `<div class="fg-items" style="display:none;margin-top:8px">${items}</div>`}
+		</div>`;
+	}
 
 	// ---- Payroll readiness (pre-flight) ----
 	runReadiness() {
@@ -3282,13 +3475,16 @@ class AngolaHR {
 				? `<div class="ahr-ready-sec ${cls}"><h6>${esc(title)}</h6><ul>${items.map(line).join("")}</ul></div>`
 				: "";
 
-		const configHtml = badConfig.length
+		const gate = this._financeGate;
+		const gateHtml = badConfig.length && gate && gate.status === "BLOCKED"
+			? this.financeGateHtml(gate, { compact: true }) : "";
+		const configHtml = gateHtml + (badConfig.length
 			? `<div class="ahr-ready-sec blocking"><h6>${__("Configuration")}</h6><ul>` +
 				badConfig
 					.map((c) => `<li>${esc(c.label)} <span class="ahr-badge ${c.ok ? "" : "danger"}">${esc(c.status)}</span></li>`)
 					.join("") +
 				`</ul></div>`
-			: "";
+			: "");
 
 		$w.html(
 			this.panel(
@@ -3791,6 +3987,46 @@ class AngolaHR {
 		});
 	}
 
+	// ---- HR workflow actions (contracts, salary changes, advances) ----
+	// The buttons come from row.actions, which the server computed per row from role,
+	// state, company scope and the no-self-approval rule. Nothing here decides which
+	// action a row should offer, and pressing one re-checks all of it server-side.
+	wfCell(row, cls) {
+		const esc = frappe.utils.escape_html;
+		return (row.actions || []).map((a) => {
+			const danger = ["reject", "cancel", "terminate"].includes(a.action);
+			const primary = ["submit_for_approval", "approve", "apply", "disburse"].includes(a.action);
+			const style = danger ? "btn-default" : (primary ? "btn-primary" : "btn-default");
+			return `<button class="btn btn-xs ${style} ${cls}" data-name="${esc(row.name)}"
+				data-action="${esc(a.action)}" data-label="${esc(a.label)}">${esc(__(a.label))}</button>`;
+		}).join(" ");
+	}
+
+	bindWf(cls, endpoint) {
+		this.$content.find("." + cls).on("click", (e) => {
+			const $b = $(e.currentTarget);
+			const name = $b.data("name");
+			const action = $b.data("action");
+			const label = $b.data("label");
+			const done = (status) => {
+				frappe.show_alert({ message: __("Status: {0}", [__(status || "")]), indicator: "green" });
+				this.render();
+			};
+			// Refusing, cancelling or ending something has to be accountable.
+			if (["reject", "cancel", "terminate"].includes(action)) {
+				frappe.prompt(
+					{ fieldtype: "Small Text", fieldname: "reason", label: __("Reason"), reqd: 1 },
+					(v) => this.call(endpoint, { name, action, reason: v.reason })
+						.then((r) => done((r || {}).status)).catch(() => {}),
+					__(label), __("Confirm"));
+				return;
+			}
+			frappe.confirm(__("{0}?", [__(label)]), () =>
+				this.call(endpoint, { name, action })
+					.then((r) => done((r || {}).status)).catch(() => {}));
+		});
+	}
+
 	view_contracts() {
 		const esc = frappe.utils.escape_html;
 		Promise.all([
@@ -3808,13 +4044,14 @@ class AngolaHR {
 					`<table class="ahr-table"><thead><tr>
 						<th>${__("Contract")}</th><th>${__("Employee")}</th><th>${__("Type")}</th>
 						<th>${__("Start")}</th><th>${__("End")}</th><th>${__("Status")}</th>
-						<th>${__("Probation")}</th><th></th></tr></thead><tbody>${all
+						<th>${__("Probation")}</th><th>${__("Waiting For")}</th><th></th></tr></thead><tbody>${all
 						.map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.employee_name)}</td>
 							<td>${esc(r.contract_type || "")}</td><td>${this.d(r.start_date)}</td>
 							<td>${r.is_open_ended ? __("Open-ended") : this.d(r.end_date)}</td>
 							<td><span class="ahr-badge ${(r.status || "").toLowerCase().replace(/ /g, "-")}">${esc(__(r.status))}</span></td>
 							<td>${esc(__(r.probation_status || "—"))}</td>
-							<td>${r.status === "Active" || r.status === "Expiring"
+							<td>${esc(r.waiting_for || "—")}</td>
+							<td>${this.wfCell(r, "ct-wf")} ${r.status === "Active" || r.status === "Expiring"
 								? `<button class="btn btn-xs btn-default ct-renew" data-n="${esc(r.name)}">${__("Renew")}</button>` : ""}</td></tr>`)
 						.join("")}</tbody></table>`)
 				: this.blank({
@@ -3855,8 +4092,13 @@ class AngolaHR {
 				this.what(__("Employment Contracts record each employee's contract type, dates, probation and renewals. Draft → Pending Approval → Active; an HR Manager approves.")) +
 				body + expiringPanel + probationPanel);
 
-			this.$content.find(".ct-bulk").on("click", () => (location.hash = "#bulkcontracts") || this.go("bulkcontracts"));
+			// go() is the only navigation this console has: the desk router owns the URL,
+			// and writing location.hash made it parse a route it had never issued, which
+			// threw inside is_app_route. The old expression also never called go() at
+			// all — the assignment it was OR-ed with evaluates to a non-empty string.
+			this.$content.find(".ct-bulk").on("click", () => this.go("bulkcontracts"));
 			this.$content.find(".ct-new").on("click", () => this.newContractDialog());
+			this.bindWf("ct-wf", "contract_action");
 			this.$content.find(".ct-renew").on("click", (e) => {
 				const name = $(e.currentTarget).data("n");
 				const d = new frappe.ui.Dialog({
@@ -3932,7 +4174,9 @@ class AngolaHR {
 						<th>${__("Employee")}</th><th>${__("Type")}</th><th>${__("Effective")}</th>
 						<th class="num">${__("From")}</th><th class="num">${__("To")}</th>
 						<th class="num">${__("Change")}</th><th>${__("Status")}</th>
-						<th>${__("Requested By")}</th><th>${__("Approved By")}</th></tr></thead>
+						<th>${__("Requested By")}</th><th>${__("Approved By")}</th>
+						<th>${__("Waiting For")}</th>
+						<th></th></tr></thead>
 					<tbody>${rows.map((r) =>
 						`<tr><td>${esc(r.employee_name)}</td><td>${esc(__(r.change_type))}</td>
 						<td>${this.d(r.effective_date)}</td>
@@ -3940,7 +4184,9 @@ class AngolaHR {
 						<td class="num">${this.money(r.new_base)}</td>
 						<td class="num">${flt(r.percentage_change)}%</td>
 						<td><span class="ahr-badge ${(r.status || "").toLowerCase().replace(/ /g, "-")}">${esc(__(r.status))}</span></td>
-						<td>${esc(r.requested_by || "")}</td><td>${esc(r.approved_by || "")}</td></tr>`)
+						<td>${esc(r.requested_by || "")}</td><td>${esc(r.approved_by || "")}</td>
+						<td>${esc(r.waiting_for || "—")}</td>
+						<td>${this.wfCell(r, "sc-wf")}</td></tr>`)
 						.join("")}</tbody></table>`)
 				: this.blank({
 					icon: "fa-line-chart",
@@ -3959,6 +4205,7 @@ class AngolaHR {
 					<b>${boundary.next_start}</b>.
 				</div>`);
 
+			this.bindWf("sc-wf", "salary_change_action");
 			this.$content.find(".sc-new").on("click", () => this.newSalaryChangeDialog(boundary));
 		});
 	}
@@ -4034,14 +4281,16 @@ class AngolaHR {
 						<th>${__("Advance")}</th><th>${__("Employee")}</th><th>${__("Requested")}</th>
 						<th class="num">${__("Approved")}</th><th class="num">${__("Recovered")}</th>
 						<th class="num">${__("Outstanding")}</th><th>${__("Instalments")}</th>
-						<th>${__("Status")}</th></tr></thead><tbody>${rows.map((r) =>
+						<th>${__("Status")}</th><th>${__("Waiting For")}</th><th></th></tr></thead><tbody>${rows.map((r) =>
 						`<tr><td>${esc(r.name)}</td><td>${esc(r.employee_name)}</td>
 						<td>${this.d(r.request_date)}</td>
 						<td class="num">${this.money(r.approved_amount)}</td>
 						<td class="num">${this.money(r.recovered_amount)}</td>
 						<td class="num">${this.money(r.outstanding_amount)}</td>
 						<td>${r.installments || "—"}</td>
-						<td><span class="ahr-badge ${(r.status || "").toLowerCase().replace(/ /g, "-")}">${esc(__(r.status))}</span></td></tr>`)
+						<td><span class="ahr-badge ${(r.status || "").toLowerCase().replace(/ /g, "-")}">${esc(__(r.status))}</span></td>
+						<td>${esc(r.waiting_for || "—")}</td>
+						<td>${this.wfCell(r, "adv-wf")}</td></tr>`)
 						.join("")}</tbody></table>`)
 				: this.blank({
 					icon: "fa-money",
@@ -4060,6 +4309,7 @@ class AngolaHR {
 					${__("Recovery takes one instalment per payroll run and is capped so that net pay can never become negative; anything uncollectable stays outstanding and is reported.")}
 				</div>`);
 
+			this.bindWf("adv-wf", "advance_action");
 			this.$content.find(".adv-new").on("click", () => this.newAdvanceDialog());
 		});
 	}
@@ -4531,13 +4781,24 @@ class AngolaHR {
 				// §8 — a missing account stops the attempt. Posting would fail on the
 				// first employee that uses it, after some others had already posted.
 				if (missing.length) {
-					frappe.msgprint({
-						title: __("Cannot post payroll accounting"),
-						indicator: "red",
-						message: `<p>${__("These accounts are not configured, so the accrual cannot be booked:")}</p>
-							<ul>${missing.map((m) => `<li><b>${esc(m.label.replace(/^Account — /, ""))}</b></li>`).join("")}</ul>
-							<p>${__("Set them under Settings → Account per Component, then post again.")}</p>`,
-					});
+					// Business language first — the person reading this may be HR, who can
+					// only contact Finance — then the technical list Finance needs.
+					this.action("finance_approval_checklist", { name })
+						.then((g) => {
+							const reasons = (g && g.reasons || []).map((r) => `<li>${esc(r)}</li>`).join("");
+							frappe.msgprint({
+								title: __("Cannot post payroll accounting"),
+								indicator: "red",
+								message: `<p><b>${__("Payroll cannot proceed until Finance configuration is complete.")}</b></p>
+									<ul>${reasons || missing.map((m) => `<li>${esc(m.label.replace(/^Account — /, ""))} — ${__("not configured. Please contact Finance.")}</li>`).join("")}</ul>
+									<p class="text-muted small">${__("Finance: configure these under Settings → Account per Component, then post again.")}<br>
+									${missing.map((m) => esc(m.label.replace(/^Account — /, ""))).join(" · ")}</p>`,
+							});
+						})
+						.catch(() => frappe.msgprint({
+							title: __("Cannot post payroll accounting"), indicator: "red",
+							message: __("Payroll cannot proceed until Finance configuration is complete. Please contact Finance."),
+						}));
 					return;
 				}
 
@@ -4739,13 +5000,25 @@ class AngolaHR {
 			const nextHtml = ns.next_action
 				? `<div class="ahr-next-step ${ns.can_act_now ? "" : "blocked"}">
 						<div><b>${__("Estado")}:</b> ${esc(ns.state_label || ns.state)}</div>
-						<div><b>${__("Próxima acção")}:</b> ${esc(ns.next_action_label || "")} — ${esc(ns.responsible || "")}</div>
+						<div><b>${__("Next action")}:</b> ${esc(ns.next_action_label || "")} — ${esc(ns.responsible || "")}</div>
 						<div class="text-muted small">${esc(ns.description || "")}</div>
 						${(ns.blockers || []).map((b) => `<div class="text-danger small">${esc(b)}</div>`).join("")}
 					</div>`
 				: `<div class="ahr-next-step"><div>${esc(ns.description || "")}</div></div>`;
 
-			const summaryHtml = nextHtml + `<div class="ahr-form-grid">
+			// The approval gate (F-04 governance): READY or BLOCKED with the reasons in
+			// business language. The server refuses submit/approve on the same check.
+			const gate = sum.approval_gate;
+			const gateBlocked = !!(gate && gate.status === "BLOCKED");
+			const gateHtml = gate
+				? `<div class="ahr-callout ${gateBlocked ? "err" : "ok"}" style="margin-bottom:10px">
+						<div><b>${__("Approval check")}:</b> <span class="ahr-badge ${gateBlocked ? "cancelled" : "paid"}">${esc(__(gate.status))}</span></div>
+						<div style="margin-top:4px">${esc(gate.headline || "")}</div>
+						${gateBlocked ? `<ul style="margin:6px 0 0 18px">${(gate.blockers || []).map((b) =>
+							`<li>${esc(b.message)} <span class="text-muted small">(${esc(__(b.owner))})</span></li>`).join("")}</ul>` : ""}
+					</div>`
+				: "";
+			const summaryHtml = gateHtml + nextHtml + `<div class="ahr-form-grid">
 				<div><b>${__("Period")}:</b> ${this.d(doc.start_date)} → ${this.d(doc.end_date)}</div>
 				<div><b>${__("Status")}:</b> <span class="ahr-badge">${esc(sum.status)}</span></div>
 				<div><b>${__("Employees")}:</b> ${t.employees}</div>
@@ -4791,13 +5064,27 @@ class AngolaHR {
 				${auditRow(__("Cancelled"), a.cancelled_by, a.cancelled_at)}
 			</tbody></table>`;
 
-			const btn = (action, label, cls) =>
-				allowed.has(action) ? `<button class="btn btn-xs ${cls} pe-act" data-action="${action}">${label}</button>` : "";
+			// Submit-for-approval and Approve are offered but inert while the approval
+			// check is BLOCKED; the reasons are on screen and the server would refuse.
+			const gated = new Set(["submit_for_approval", "approve"]);
+			const btn = (action, label, cls) => {
+				if (!allowed.has(action)) return "";
+				if (gateBlocked && gated.has(action)) {
+					return `<button class="btn btn-xs ${cls} pe-act" data-action="${action}" disabled
+						title="${esc(__("Payroll cannot proceed until Finance configuration is complete."))}">${label}</button>`;
+				}
+				return `<button class="btn btn-xs ${cls} pe-act" data-action="${action}">${label}</button>`;
+			};
 
-			const canPost = sum.status === "Approved" || sum.status === "Posted";
-			const canPay = sum.status === "Payment Ready";
-			const canExport = sum.status === "Payment Ready" || sum.status === "Paid";
-			const canSubmitSlips = sum.draft_slips > 0 && (sum.status === "Approved" || sum.status === "Posted");
+			// Finance buttons come from the server (payroll_workflow.finance_flags): role,
+			// the Finance rule, company scope, who prepared the run and the state. The
+			// state alone used to decide, so an HR user saw Post / Pay / Bank File and was
+			// refused on click.
+			const fin = sum.finance || {};
+			const canPost = !!fin.can_post;
+			const canPay = !!fin.can_pay;
+			const canExport = !!fin.can_export_bank;
+			const canSubmitSlips = sum.draft_slips > 0 && !!fin.can_submit_slips;
 
 			const d = new frappe.ui.Dialog({ title: `${doc.name} — ${sum.status}`, size: "extra-large" });
 			// The summary the confirmation dialogs quote comes from the same payload
@@ -5029,12 +5316,15 @@ class AngolaHR {
 				) +
 					this.panel(
 					{ title: __("Working Days"), icon: "fa-calendar",
-						subtitle: __("How a month's working days are counted — from the holiday list, or a fixed number.") },
+						subtitle: __("How a month's working days are counted: as days, as hour-equivalents, or as a fixed number.") },
 						`<div class="ahr-form-grid">
-							${sel("working_days_basis", "Working Days Basis", ["Auto (Holiday List)", "Standard (Fixed)"])}
+							${sel("working_days_basis", "Working Days Basis", ["Calendar Working Days", "Auto (Holiday List)", "Standard (Fixed)"])}
 							${num("standard_working_days", "Standard Working Days")}
 						</div>
-						<div class="text-muted small" style="margin-top:6px;">${__("Working/short days (e.g. Saturday 4h, or non-working) come from each employee's Shift Type weekly schedule.")}</div>`
+						<div class="text-muted small" style="margin-top:6px;">${__("Working/short days (e.g. Saturday 4h, or non-working) come from each employee's Shift Type weekly schedule.")}<br>
+							<b>${__("Calendar Working Days")}</b>: ${__("counts days — a full scheduled weekday is 1 whatever its clock length (a 9.5-hour day is still one day), a short day such as a 4-hour Saturday is 0.5, and a non-working day is 0. 22 weekdays + 5 Saturdays = 24.5 days.")}<br>
+							<b>${__("Auto (Holiday List)")}</b>: ${__("counts standard-day EQUIVALENTS — each day is worth its hours divided by Standard Daily Hours, so a 9.5-hour day counts 1.19. The figure is in hours-worth-of-days, not days.")}<br>
+							<b>${__("Standard (Fixed)")}</b>: ${__("the same fixed number for every employee and every month.")}</div>`
 					) +
 					this.panel(
 					{ title: __("Final Settlement (Termination)"), icon: "fa-sign-out",
@@ -5045,6 +5335,26 @@ class AngolaHR {
 						</div>
 						<div class="text-muted small" style="margin-top:6px;">${__("Divisors for the proportional salary daily rate (÷26) and the untaken-leave daily rate (÷22) used in the Final Settlement.")}</div>`
 					) +
+					this.groupLabel(__("Approvals")) +
+				this.panel(
+					{ title: __("Who may approve what"), icon: "fa-user-secret",
+						subtitle: __("Whether the person who prepares a request may also approve it. These were always enforced by the server; they simply had nowhere to be seen or changed.") },
+						chk("require_separate_contract_approval", "Contract — a different user must approve") +
+							chk("require_separate_salary_change_approval", "Salary change — a different user must approve") +
+							chk("require_separate_advance_approval", "Salary advance — a different user must approve") +
+							chk("require_separate_settlement_approval", "Final settlement — a different user must approve") +
+							chk("require_separate_payroll_approval", "Payroll — a different user must approve") +
+							chk("require_separate_payment_approval", "Payment — the approver may not authorise the payment") +
+						`<div class="text-muted small" style="margin-top:6px;">${__("Clear a box to let one HR Manager both prepare and approve that process. Doing so never removes the permission check: the same capability, company scope and workflow state are still required, and the approval is still stamped with who gave it.")}</div>`
+					) +
+				this.panel(
+					{ title: __("HR / Finance boundary"), icon: "fa-university",
+						subtitle: __("Where HR stops and Finance starts. Defaults: self-approval off, both Finance rules on.") },
+						chk("allow_hr_self_approval", "HR self-approval — the HR Manager who submitted a payroll may approve it") +
+							chk("payroll_posting_requires_finance", "Payroll posting requires Finance") +
+							chk("payroll_payment_requires_finance", "Payroll payment requires Finance") +
+						`<div class="text-muted small" style="margin-top:6px;">${__("With a Finance rule on, the action needs the Payroll Finance Approver role — or Accounts Manager held by somebody with no HR or payroll role — and the person who prepared the run can never do it, whatever roles they hold. Buttons the current user cannot execute are not shown.")}</div>`
+					) +
 					this.groupLabel(__("Components and accounting")) +
 				this.panel(
 					{ title: __("Enabled Components"), icon: "fa-toggle-on",
@@ -5052,7 +5362,10 @@ class AngolaHR {
 						chk("enable_productivity_bonus", "Prémio de Produtividade") +
 							chk("enable_overtime", "Horas Extras") +
 							chk("enable_adiantamento", "Adiantamento") +
-							chk("enable_family_allowance", "Abono de Família")
+							chk("enable_family_allowance", "Abono de Família") +
+							chk("enable_ferias", "Subsídio de Férias") +
+							chk("enable_natal", "Subsídio de Natal (13.º)") +
+						`<div class="text-muted small" style="margin-top:6px;">${__("The two subsidies are statutory (Lei n.º 12/23, artigo 238.º). Their percentage and payment month are set above; these boxes decide whether they are paid at all. With Subsídio de Natal cleared, the December run proposes no 13th month and a slip that carries one is refused.")}</div>`
 					) +
 					this.panel(
 					{ title: __("Net Pay (Journal Entry)"), icon: "fa-book",
@@ -5068,10 +5381,17 @@ class AngolaHR {
 						subtitle: __("The account each individual earning or deduction is booked to.") },
 					`<div class="ahr-form-grid">${(s.component_accounts || [])
 						.map((c) => `<div class="ahr-field"><label>${frappe.utils.escape_html(c.component)} (${c.abbr})</label><div class="set-link-ca" data-abbr="${c.abbr}" data-val="${c.account ? frappe.utils.escape_html(c.account) : ""}"></div></div>`)
-						.join("")}</div>`
+						.join("")}</div>
+					<div class="ahr-callout warn" style="margin-top:10px">${__("Choosing an account is a Finance decision. Once a payroll has been posted, every change here is recorded (who, when, old account, new account) and flagged: previous payroll vouchers remain unchanged and new payroll uses the new mapping.")}</div>`
+				) +
+				this.panel(
+					{ title: __("Account mapping history"), icon: "fa-history",
+						subtitle: __("Every change to the payroll accounts, and whether a payroll had already been posted under the old mapping.") },
+					`<div class="ahr-mapping-history"><div class="ahr-empty">${__("Loading…")}</div></div>`
 				) +
 				`<button class="btn btn-primary btn-sm set-save"><i class="fa fa-save"></i> ${__("Save Settings")}</button>`
 			);
+			this.loadMappingHistory();
 
 			// Instantiate Account Link controls (search-as-you-type, leaf accounts only).
 			const accCtrls = {};
@@ -5091,13 +5411,23 @@ class AngolaHR {
 				if (value) ctrl.set_value(value);
 				return ctrl;
 			};
+			// A reader gets the value, not an editor. Instantiating the Link control
+			// makes it validate its value against Account, which a role without
+			// accounting access is refused — sixteen 403s on one screen, for somebody who
+			// was only ever going to read it. The answer is to stop offering the editor,
+			// not to widen the permission.
+			const canWrite = !!cint(s._can_write);
+			const showValue = (el, value) =>
+				$(el).text(value || "—").addClass("ahr-static-value");
 			this.$content.find(".set-link").each((_, el) => {
 				const k = $(el).data("k");
-				accCtrls[k] = mkLink(el, s[k]);
+				if (canWrite) accCtrls[k] = mkLink(el, s[k]);
+				else showValue(el, s[k]);
 			});
 			this.$content.find(".set-link-ca").each((_, el) => {
 				const abbr = $(el).data("abbr");
-				caCtrls[abbr] = mkLink(el, $(el).attr("data-val"));
+				if (canWrite) caCtrls[abbr] = mkLink(el, $(el).attr("data-val"));
+				else showValue(el, $(el).attr("data-val"));
 			});
 
 			// Default Holiday List link (Company-level).
@@ -5109,6 +5439,15 @@ class AngolaHR {
 				});
 				if (s.default_holiday_list) hlCtrl.set_value(s.default_holiday_list);
 			});
+			if (!canWrite) {
+				// The Save button must not offer what the server refuses.
+				this.$content.find(".set-save").remove();
+				this.$content.find("input, select, textarea").prop("disabled", true);
+				this.$content.find(".set-link-hl").each((_, el) => {
+					$(el).empty().text(s.default_holiday_list || "—");
+				});
+				hlCtrl = null;
+			}
 
 			this.$content.find(".set-save").on("click", () => {
 				const data = {};
@@ -5124,11 +5463,63 @@ class AngolaHR {
 					data.default_holiday_list = hlCtrl.get_value() || null;
 					data._company = s._company || this.state.company || null;
 				}
-				this.call("save_settings", { data: JSON.stringify(data) }).then(() =>
-					frappe.show_alert({ message: __("Settings saved"), indicator: "green" })
-				);
+				this.call("save_settings", { data: JSON.stringify(data) }).then((r) => {
+					const n = (r && r.mapping_changes) || 0;
+					frappe.show_alert({
+						message: n ? __("Settings saved — {0} account mapping change(s) recorded", [n]) : __("Settings saved"),
+						indicator: n ? "orange" : "green" });
+					if (n) this.loadMappingHistory();
+				});
 			});
 		});
+	}
+
+	loadMappingHistory() {
+		const $slot = this.$content.find(".ahr-mapping-history");
+		if (!$slot.length) return;
+		const esc = frappe.utils.escape_html;
+		this.action("payroll_account_history", { company: this.state.company }).then((h) => {
+			const rows = (h && h.rows) || [];
+			// Drift against the last posted run, and the Finance confirmation that clears it.
+			let driftHtml = "";
+			if (h && h.drifted) {
+				const moved = ((h.drift || {}).posted_to_unmapped_accounts || []).map((d) => esc(d.account)).join(", ");
+				driftHtml = h.confirmed
+					? `<div class="ahr-callout ok" style="margin-bottom:10px">${__("{0} was posted under an earlier mapping ({1}). Finance confirmed the current mapping on {2} ({3}).", [esc(h.last_posted), moved, this.d(h.confirmed.changed_on), esc(h.confirmed.changed_by)])}</div>`
+					: `<div class="ahr-callout err" style="margin-bottom:10px">
+						<b>${__("Mapping drift")}</b> — ${__("The previous payroll ({0}) was posted to accounts that are no longer mapped: {1}. Previous payroll vouchers remain unchanged; new payroll will use the new mapping. Finance must confirm the current mapping before the next payroll can be approved.", [esc(h.last_posted), moved])}
+						${h.can_confirm ? `<div style="margin-top:8px"><button class="btn btn-xs btn-primary ahr-confirm-mapping">${__("Confirm current mapping (Finance)")}</button></div>` : `<div class="text-muted small" style="margin-top:6px">${__("Only Finance can confirm the mapping.")}</div>`}
+					</div>`;
+			}
+			if (!rows.length) {
+				$slot.html(driftHtml + `<div class="ahr-empty">${__("No account mapping change has been recorded.")}</div>`);
+			} else {
+			$slot.html(driftHtml + `<table class="ahr-table"><thead><tr>
+				<th>${__("Changed on")}</th><th>${__("Mapping")}</th><th>${__("Old account")}</th>
+				<th>${__("New account")}</th><th>${__("Changed by")}</th><th>${__("After payroll posting")}</th>
+			</tr></thead><tbody>${rows.map((r) => `<tr>
+				<td>${this.d(r.changed_on)}</td>
+				<td>${esc(r.label || r.account_key)} <span class="text-muted small">(${esc(r.account_key)})</span></td>
+				<td>${esc(r.old_account || "—")}</td>
+				<td>${esc(r.new_account || "—")}</td>
+				<td>${esc(r.changed_by)}</td>
+				<td>${r.after_posting
+					? `<span class="ahr-badge cancelled">${__("Yes")}</span> <span class="text-muted small">${esc(r.posted_payroll || "")}</span>`
+					: `<span class="ahr-badge paid">${__("No")}</span>`}</td>
+			</tr>`).join("")}</tbody></table>
+			<div class="text-muted small" style="margin-top:6px">${__("A change flagged Yes was made after a payroll had been posted: previous payroll vouchers remain unchanged and new payroll uses the new mapping.")}</div>`);
+			}
+			$slot.find(".ahr-confirm-mapping").on("click", () => {
+				frappe.prompt(
+					[{ fieldname: "note", fieldtype: "Small Text", label: __("Note (optional)"),
+						description: __("Recorded with your name and the mapping in force: {0}", [esc(h.snapshot || "")]) }],
+					(v) => this.action("confirm_account_mapping", { note: v.note || null }).then(() => {
+						frappe.show_alert({ message: __("Mapping confirmed"), indicator: "green" });
+						this.loadMappingHistory();
+					}).catch((err) => this.fail(__("Could not confirm the mapping"), err)),
+					__("Confirm the current account mapping"), __("Confirm"));
+			});
+		}).catch(() => $slot.empty());
 	}
 
 	// ==================================================================== //
@@ -6275,8 +6666,17 @@ class AngolaHR {
 	/* §15 — the panel that interviewed the candidate normally has no HRMS login, so the
 	 * result has to be enterable by HR or it is never recorded at all. */
 	recordInterviewDialog() {
-		this.call("interview_pipeline", { company: this.state.company }).then((rows) => {
-			const pending = (rows || []).filter((r) => !["Cleared", "Rejected"].includes(r.status));
+		this.call("interview_pipeline", { company: this.state.company }).then((res) => {
+			// interview_pipeline answers with {available, rows, stages, rounds} — reading it
+			// as a bare list threw "filter is not a function" and the button did nothing at
+			// all, silently, because the rejection had nowhere to surface.
+			if (res && res.available === false) {
+				frappe.msgprint({ title: __("Recruitment is not available"),
+					message: res.message || __("ERPNext recruitment is not installed on this site.") });
+				return;
+			}
+			const rows = (res && res.rows) || [];
+			const pending = rows.filter((r) => !["Cleared", "Rejected"].includes(r.status));
 			if (!pending.length) {
 				frappe.msgprint({
 					title: __("No interview is waiting for a result"),

@@ -268,7 +268,7 @@ def _notify_hr_of_upload(doc):
 
 	try:
 		notify._notify(
-			_("Documento submetido — {0}").format(doc.name),
+			_("Document submitted — {0}").format(doc.name),
 			_("{0} uploaded a {1} for verification.").format(
 				doc.employee_name or doc.employee, doc.document_type),
 			notify._recipients_hr(), "Isoft Employee Document", doc.name)
@@ -299,7 +299,7 @@ def verify_document(name, decision, reason=None):
 
 	try:
 		notify._tell(doc.employee,
-		             _("Documento {0} — {1}").format(doc.name, _(decision)),
+		             _("Document {0} — {1}").format(doc.name, _(decision)),
 		             _("Your {0} was {1}.{2}").format(
 			             doc.document_type, _(decision).lower(),
 			             " " + reason if reason else ""),

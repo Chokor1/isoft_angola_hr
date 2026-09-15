@@ -701,3 +701,152 @@ class TestSettlementLegalReference(SettlementFixture):
 		text = " ".join(q["answer"] for q in ref["open_questions"])
 		self.assertIn(law.REVIEW_MARKER, text)
 		self.assertIn("COMPANY CALCULATION BASIS", text.upper())
+
+
+# --------------------------------------------------------------------------- #
+# Overtime in the final settlement
+# --------------------------------------------------------------------------- #
+class TestSettlementOvertime(SettlementFixture):
+	"""Approved overtime must reach the settlement, and must never be inferred.
+
+	The rule that matters: overtime comes from SUBMITTED Attendance records carrying
+	overtime hours — the same source monthly payroll uses. It is never derived from days
+	worked against a divisor, because that arithmetic says nothing about whether anybody
+	worked an extra hour.
+	"""
+
+	def _set_overtime(self, enabled):
+		previous = frappe.db.get_single_value("Isoft HR Settings", "enable_overtime")
+		frappe.db.set_value("Isoft HR Settings", "Isoft HR Settings",
+		                    "enable_overtime", 1 if enabled else 0)
+		frappe.clear_cache(doctype="Isoft HR Settings")
+
+		def restore():
+			frappe.db.set_value("Isoft HR Settings", "Isoft HR Settings",
+			                    "enable_overtime", previous)
+			frappe.clear_cache(doctype="Isoft HR Settings")
+
+		self.addCleanup(restore)
+
+	def _overtime_attendance(self, employee, dates_hours):
+		for date, hours in dates_hours:
+			doc = frappe.get_doc({
+				"doctype": "Attendance", "employee": employee, "company": self.company,
+				"attendance_date": getdate(date), "status": "Present",
+				"custom_overtime_hours": hours,
+			})
+			doc.insert(ignore_permissions=True)
+			doc.submit()
+
+	def _window(self, employee, term):
+		return fs.collect_unpaid_overtime(
+			employee, self.company, 200000.0, add_days(term, -6), term)
+
+	def test_approved_overtime_is_collected_from_attendance(self):
+		self._set_overtime(True)
+		term = getdate(self.termination_date) if hasattr(self, "termination_date") \
+			else getdate(frappe.utils.nowdate())
+		self._overtime_attendance(self.employee.name,
+		                          [(add_days(term, -3), 3.0), (add_days(term, -2), 2.5)])
+		ot = self._window(self.employee.name, term)
+
+		self.assertTrue(ot["enabled"])
+		self.assertAlmostEqual(ot["hours"], 5.5, places=2)
+		self.assertEqual(ot["days"], 2)
+		self.assertGreater(ot["amount"], 0)
+
+	def test_the_hourly_value_uses_a_whole_month_not_the_unpaid_window(self):
+		"""Regression: pricing overtime off a three-day window made one hour of overtime
+		worth about eight times a full day's pay."""
+		self._set_overtime(True)
+		term = getdate(frappe.utils.nowdate())
+		self._overtime_attendance(self.employee.name, [(add_days(term, -2), 4.0)])
+		ot = self._window(self.employee.name, term)
+
+		# The divisor must be a month's working days, not the 6-day window.
+		self.assertGreater(ot["rate_working_days"], 15,
+		                   "the rate basis must be a whole payroll period")
+		implied_hourly = ot["amount"] / (ot["hours"] * ot["multiplier"])
+		self.assertLess(implied_hourly, 200000.0 / 15 / 4,
+		                "an overtime hour cannot approach a day's pay")
+
+	def test_disabled_overtime_pays_nothing_but_warns_loudly(self):
+		self._set_overtime(False)
+		term = getdate(frappe.utils.nowdate())
+		self._overtime_attendance(self.employee.name, [(add_days(term, -2), 6.0)])
+		ot = self._window(self.employee.name, term)
+
+		flags = []
+		lines = fs._overtime_lines({"overtime": ot}, flags)
+		self.assertEqual(lines, [], "nothing may be paid while overtime is disabled")
+		self.assertAlmostEqual(ot["hours"], 6.0, places=2,
+		                       msg="the hours must still be detected")
+		self.assertTrue(any(f["code"] == "OT-DISABLED" for f in flags),
+		                "approved overtime must never be discarded silently")
+		self.assertEqual(
+			[f["level"] for f in flags if f["code"] == "OT-DISABLED"], ["warning"])
+
+	def test_no_overtime_produces_no_line_and_no_flag(self):
+		self._set_overtime(True)
+		term = getdate(frappe.utils.nowdate())
+		ot = self._window(self.employee.name, term)
+		flags = []
+		self.assertEqual(fs._overtime_lines({"overtime": ot}, flags), [])
+		self.assertEqual(flags, [])
+
+	def test_the_printed_formula_equals_the_amount_paid(self):
+		self._set_overtime(True)
+		term = getdate(frappe.utils.nowdate())
+		self._overtime_attendance(self.employee.name, [(add_days(term, -3), 3.0)])
+		ot = self._window(self.employee.name, term)
+		lines = fs._overtime_lines({"overtime": ot}, [])
+
+		self.assertEqual(len(lines), 1)
+		# The engine's own guard: a printed a × b must equal the stored amount.
+		fs._check_reconciles(lines)
+
+	def test_the_overtime_line_explains_where_the_hours_came_from(self):
+		self._set_overtime(True)
+		term = getdate(frappe.utils.nowdate())
+		self._overtime_attendance(self.employee.name, [(add_days(term, -3), 3.0)])
+		lines = fs._overtime_lines({"overtime": self._window(self.employee.name, term)}, [])
+
+		note = lines[0]["note"]
+		self.assertIn("Attendance", note)
+		self.assertIn("never from days worked", note)
+		self.assertTrue(lines[0]["formula"])
+
+
+class TestSettlementTotalsAndLegalFlags(SettlementFixture):
+	def test_header_totals_come_from_the_same_computation_as_the_lines(self):
+		"""Regression: totals were read from stored fields while the breakdown was
+		recomputed, so a draft settlement showed a full trace under a blank Gross/Net."""
+		doc = self.make_settlement()
+		res = api.get_settlement(doc.name)
+
+		earnings = sum(flt(l["amount"]) for l in res["lines"] if l["sign"] > 0)
+		deductions = sum(flt(l["amount"]) for l in res["lines"] if l["sign"] < 0)
+		self.assertIsNotNone(res["gross"])
+		self.assertIsNotNone(res["net"])
+		self.assertAlmostEqual(flt(res["gross"]), earnings, places=2)
+		self.assertAlmostEqual(flt(res["total_deductions"]), deductions, places=2)
+		self.assertAlmostEqual(flt(res["gross"]) - flt(res["total_deductions"])
+		                       + flt(res["shortfall"]), flt(res["net"]), places=2)
+
+	def test_the_irt_assumption_is_always_surfaced_for_legal_confirmation(self):
+		"""IRT-LUMP is an unverified legal assumption. It must reach the screen on every
+		settlement, and it must say so in words — never be downgraded to a silent note."""
+		doc = self.make_settlement()
+		res = api.get_settlement(doc.name)
+
+		flag = next((f for f in res["flags"] if f["code"] == "IRT-LUMP"), None)
+		self.assertIsNotNone(flag, "the IRT assumption must never stop being declared")
+		self.assertEqual(flag["level"], "verify")
+		self.assertIn("requires legal confirmation", flag["message"])
+
+	def test_every_printed_calculation_equals_the_amount_it_explains(self):
+		doc = self.make_settlement()
+		res = api.get_settlement(doc.name)
+		fs._check_reconciles(res["lines"])
+		self.assertTrue(any(l.get("formula") for l in res["lines"]),
+		                "a settlement with no printed calculation explains nothing")

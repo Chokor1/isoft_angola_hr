@@ -31,19 +31,6 @@
   "settlement_working_days_per_week",
   "settlement_leave_includes_allowances",
   "settlement_compensation_tax_position",
-  "controls_section",
-  "require_separate_payroll_approval",
-  "require_separate_payment_approval",
-  "column_break_controls",
-  "variance_threshold_percent",
-  "hr_controls_section",
-  "require_separate_contract_approval",
-  "require_separate_salary_change_approval",
-  "require_separate_advance_approval",
-  "column_break_hr_controls",
-  "contract_expiry_thresholds",
-  "document_expiry_thresholds",
-  "probation_review_window_days",
   "components_section",
   "enable_productivity_bonus",
   "enable_overtime",
@@ -57,7 +44,24 @@
   "salary_payment_account",
   "component_accounts_section",
   "component_accounts",
-  "payroll_preview_columns"
+  "payroll_preview_columns",
+  "controls_section",
+  "require_separate_payroll_approval",
+  "require_separate_payment_approval",
+  "allow_hr_self_approval",
+  "payroll_posting_requires_finance",
+  "payroll_payment_requires_finance",
+  "column_break_controls",
+  "variance_threshold_percent",
+  "hr_controls_section",
+  "require_separate_contract_approval",
+  "require_separate_salary_change_approval",
+  "require_separate_advance_approval",
+  "require_separate_settlement_approval",
+  "column_break_hr_controls",
+  "contract_expiry_thresholds",
+  "document_expiry_thresholds",
+  "probation_review_window_days"
  ],
  "fields": [
   {
@@ -140,8 +144,8 @@
    "fieldname": "working_days_basis",
    "fieldtype": "Select",
    "label": "Working Days Basis",
-   "options": "Auto (Holiday List)\nStandard (Fixed)",
-   "description": "Auto: calendar days minus holidays (and, with Validate Attendance, minus absences/unpaid leave). Standard: a fixed number of working days."
+   "options": "Auto (Holiday List)\nCalendar Working Days\nStandard (Fixed)",
+   "description": "Calendar Working Days: counts DAYS — a full scheduled weekday is 1 whatever its clock length, a short day such as a 4-hour Saturday is 0.5, and a non-working day is 0, so 22 weekdays + 5 Saturdays = 24.5. Auto: counts standard-day equivalents from shift hours, so a 9.5-hour day becomes 1.19 — hours, not days. Standard (Fixed): the same number for every employee every month."
   },
   {
    "default": "30",
@@ -323,6 +327,27 @@
    "description": "The user who approved a payroll may not authorise its payment."
   },
   {
+   "fieldname": "allow_hr_self_approval",
+   "fieldtype": "Check",
+   "default": "0",
+   "label": "Allow HR Self-Approval of Payroll",
+   "description": "ON: the HR Manager who submitted a payroll may also approve it (one-person HR). OFF (default): a different user must approve. Never affects posting or payment."
+  },
+  {
+   "fieldname": "payroll_posting_requires_finance",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Payroll Posting Requires Finance",
+   "description": "ON (default): posting the accrual and submitting the slips are Finance actions — Payroll Finance Approver, or Accounts Manager held by somebody with no HR/payroll role — and never the person who prepared the run, whatever roles they hold. OFF: any Accounts Manager may post."
+  },
+  {
+   "fieldname": "payroll_payment_requires_finance",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Payroll Payment Requires Finance",
+   "description": "ON (default): releasing for payment, generating the bank file, recording the bank's answer and confirming payment are Finance actions and never the preparer's. OFF: any Accounts Manager may pay."
+  },
+  {
    "fieldname": "column_break_controls",
    "fieldtype": "Column Break"
   },
@@ -359,6 +384,13 @@
    "label": "Require Separate Advance Approval"
   },
   {
+   "fieldname": "require_separate_settlement_approval",
+   "fieldtype": "Check",
+   "default": "1",
+   "label": "Require Separate Settlement Approval",
+   "description": "The user who prepares a final settlement may not approve it. Previously this followed the ADVANCE switch, so turning advances self-approvable silently did the same to settlements."
+  },
+  {
    "fieldname": "column_break_hr_controls",
    "fieldtype": "Column Break"
   },
@@ -385,7 +417,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-29 00:00:00.000000",
+ "modified": "2026-09-08 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Isoft Angola HR",
  "name": "Isoft HR Settings",

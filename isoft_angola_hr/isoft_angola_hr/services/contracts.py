@@ -52,23 +52,31 @@ ACTIVATE = "activate"
 TERMINATE = "terminate"
 CANCEL = "cancel"
 
+#: The happy path, in order, for the progress strip on screen. States off
+#: this path (Rejected, Cancelled) are shown as the current state instead.
+STAGES = (DRAFT, PENDING_APPROVAL, ACTIVE, EXPIRING, EXPIRED)
+
 _TRANSITIONS = {
 	SUBMIT: {"from": (DRAFT, REJECTED), "to": PENDING_APPROVAL,
 	         "permission": perms.CONTRACT_WRITE, "stamp": ("submitted_by", "submitted_at"),
-	         "label": _("Submit for Approval")},
+	         "label": "Submit for Approval"},
 	APPROVE: {"from": (PENDING_APPROVAL,), "to": ACTIVE,
 	          "permission": perms.CONTRACT_APPROVE, "stamp": ("approved_by", "approved_at"),
-	          "label": _("Approve Contract")},
+	          "label": "Approve Contract"},
 	REJECT: {"from": (PENDING_APPROVAL,), "to": REJECTED,
 	         "permission": perms.CONTRACT_APPROVE, "stamp": (None, None),
-	         "label": _("Reject Contract")},
+	         "label": "Reject Contract"},
 	TERMINATE: {"from": (ACTIVE, EXPIRING), "to": TERMINATED,
 	            "permission": perms.CONTRACT_APPROVE, "stamp": (None, None),
-	            "label": _("Terminate Contract")},
+	            "label": "Terminate Contract"},
 	CANCEL: {"from": (DRAFT, PENDING_APPROVAL, REJECTED, ACTIVE, EXPIRING), "to": CANCELLED,
 	         "permission": perms.CONTRACT_APPROVE, "stamp": (None, None),
-	         "label": _("Cancel Contract")},
+	         "label": "Cancel Contract"},
 }
+
+#: Public alias — the UI summary reads the transition table so a screen can
+#: never describe a workflow differently from the rule that enforces it.
+TRANSITIONS = _TRANSITIONS
 
 #: Expiry reminder thresholds, in days. Configurable through Isoft HR Settings.
 DEFAULT_EXPIRY_THRESHOLDS = (90, 60, 30, 15, 7)
@@ -90,6 +98,20 @@ def state_of(contract):
 	return contract.get("status") or DRAFT
 
 
+def action_label(action):
+	"""Human label for a transition, taken from the transition table itself so a button
+	can never describe an action differently from the rule that governs it."""
+	spec = _TRANSITIONS.get(action)
+	# Translated HERE, not in the table. A _() in the module-level table runs once
+	# at import and freezes the label in the language the worker booted in.
+	return _(spec["label"]) if spec else action
+
+
+def actions_for(doc, user=None):
+	"""[(action, label)] the user may perform on ``doc`` right now."""
+	return [{"action": a, "label": action_label(a)} for a in allowed_actions(doc, user=user)]
+
+
 def allowed_actions(contract, user=None):
 	out = []
 	for action, spec in _TRANSITIONS.items():
@@ -99,8 +121,24 @@ def allowed_actions(contract, user=None):
 			continue
 		if not perms.can_company(contract.get("company"), user=user):
 			continue
+		if action == APPROVE and _is_self_approval(contract, user):
+			continue
 		out.append(action)
 	return out
+
+
+def _is_self_approval(contract, user=None):
+	"""Would approving this be the preparer approving their own work?
+
+	Advances and salary changes have always filtered their Approve action on this;
+	contracts did not, so with separation ON the screen offered an Approve button and
+	the server then refused the click — the user saw a permission error where the
+	button should simply not have been. Same question, same answer, all three workflows.
+	"""
+	if not require_separate_contract_approval():
+		return False
+	preparer = contract.get("submitted_by") or contract.get("prepared_by")
+	return bool(preparer) and preparer == (user or frappe.session.user)
 
 
 def assert_transition(contract, action, user=None):
@@ -115,19 +153,19 @@ def assert_transition(contract, action, user=None):
 				spec["label"], _(state_of(contract)), ", ".join(_(s) for s in spec["from"])),
 			title=_("Invalid Contract State"))
 	# Preparing and approving an employment agreement should not be the same person.
-	if action == APPROVE and require_separate_contract_approval():
-		preparer = contract.get("submitted_by") or contract.get("prepared_by")
-		if preparer and preparer == (user or frappe.session.user):
-			frappe.throw(
-				_("Não pode aprovar um contrato que preparou. A contract submitted by {0} must "
-				  "be approved by a different user.").format(preparer),
-				title=_("Self-Approval Blocked"))
+	if action == APPROVE and _is_self_approval(contract, user):
+		frappe.throw(
+			_("You cannot approve a contract you prepared. A contract submitted by {0} "
+			  "must be approved by a different user.").format(
+				contract.get("submitted_by") or contract.get("prepared_by")),
+			title=_("Self-Approval Blocked"))
 	return spec
 
 
 def require_separate_contract_approval():
-	value = frappe.db.get_single_value("Isoft HR Settings", "require_separate_contract_approval")
-	return cint(1 if value is None or value == "" else value)
+	"""See isoft_hr_settings.separation_required for why this is not get_single_value."""
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import separation_required
+	return separation_required("require_separate_contract_approval")
 
 
 def perform(contract, action, user=None, reason=None, save=True):

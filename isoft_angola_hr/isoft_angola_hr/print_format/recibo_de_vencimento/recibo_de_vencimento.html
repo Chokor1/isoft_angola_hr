@@ -1,0 +1,245 @@
+{#- "Recibo de Vencimento" / "Payslip" — Isoft Angola HR official salary receipt.
+
+    A4 portrait, two copies back to back: page 1 ORIGINAL (for the employee), page 2
+    DUPLICADO - ARQUIVO EMPRESA (for the company file). Both copies print the same data.
+
+    LANGUAGE — every label goes through t(), i.e. _() with the receipt's own translation
+    context, resolved while this template renders, so the receipt follows the language of
+    the user who asked for it (frappe.local.lang). Names, NIF, social-security numbers,
+    IBANs, codes and amounts are data and are never translated.
+
+    FIGURES — every amount is copied from the Isoft Salary Slip by
+    isoft_recibo_context (payroll/recibo.py). Nothing here calculates payroll.
+
+    RENDERER — wkhtmltopdf (Qt WebKit): tables, pt units, no flexbox / grid. The
+    stylesheet lives in the Print Format's CSS field (recibo_de_vencimento.css). -#}
+{%- set r = isoft_recibo_context(doc) -%}
+{%- set ctx = "Recibo de Vencimento" -%}
+{%- set cur = r.currency or "" -%}
+
+{%- macro t(msgid) -%}{{ _(msgid, context=ctx) }}{%- endmacro -%}
+{#- Amounts in the site's number format, no symbol: every amount column states the
+    currency in its heading. -#}
+{%- macro money(v) -%}{{ frappe.utils.fmt_money(v or 0, 2) }}{%- endmacro -%}
+{#- Day / hour counters: "24" rather than "24,00", "24,5" kept as is. -#}
+{%- macro qty(v) -%}{%- set s = frappe.utils.fmt_money(v or 0, 2) -%}{{ s[:-3] if s[-2:] == "00" else s }}{%- endmacro -%}
+{%- macro d(v) -%}{% if v %}{{ frappe.utils.formatdate(v) }}{% else %}&mdash;{% endif %}{%- endmacro -%}
+{%- macro val(v) -%}{% if v %}{{ v }}{% else %}&mdash;{% endif %}{%- endmacro -%}
+
+{%- macro lines_table(title, rows, memos, total_label, total) -%}
+  <div class="rv-sec-title">{{ title }}</div>
+  <table class="rv-lines">
+    <thead>
+      <tr>
+        <th class="c-code">{{ t("Code") }}</th>
+        <th class="c-desc">{{ t("Description") }}</th>
+        <th class="c-amt">{{ t("Amount") }} ({{ cur }})</th>
+      </tr>
+    </thead>
+    <tbody>
+      {%- for row in rows %}
+      <tr>
+        <td class="c-code">{{ row.code }}</td>
+        <td class="c-desc">{{ row.label }}</td>
+        <td class="c-amt">{{ money(row.amount) }}</td>
+      </tr>
+      {%- endfor %}
+      {#- Statistical components: printed for the record, excluded from every total. -#}
+      {%- for row in memos %}
+      <tr class="rv-memo">
+        <td class="c-code">{{ row.code }}</td>
+        <td class="c-desc">{{ row.label }} <span class="rv-memo-tag">({{ t("informative, not included in totals") }})</span></td>
+        <td class="c-amt">{{ money(row.amount) }}</td>
+      </tr>
+      {%- endfor %}
+      {%- if not rows and not memos %}
+      <tr class="rv-empty"><td colspan="3">&mdash;</td></tr>
+      {%- endif %}
+    </tbody>
+    <tfoot>
+      <tr class="rv-total">
+        <td colspan="2">{{ total_label }}</td>
+        <td class="c-amt">{{ money(total) }}</td>
+      </tr>
+    </tfoot>
+  </table>
+{%- endmacro -%}
+
+{%- macro receipt(copy, page_no, page_count) -%}
+<div class="rv-copy rv-copy-{{ copy.key }}{% if page_no > 1 %} rv-break{% endif %}">
+
+  <!-- ================= HEADER: company master data + document identity ================= -->
+  <table class="rv-head">
+    <tr>
+      <td class="rv-head-co">
+        <table class="rv-co">
+          <tr>
+            {#- The company logo is deliberately not printed (HR review, Sept 2026). -#}
+            <td class="rv-co-text">
+              <div class="rv-co-name">{{ r.company.name or "" }}</div>
+              {%- if r.company.nif %}<div class="rv-co-line">NIF: {{ r.company.nif }}</div>{% endif %}
+              {%- for line in r.company.address_lines %}<div class="rv-co-line">{{ line }}</div>{% endfor %}
+              {#- Phone, e-mail and website are deliberately not printed (HR review, Sept 2026). -#}
+            </td>
+          </tr>
+        </table>
+      </td>
+      <td class="rv-head-doc">
+        <div class="rv-title">{{ t("Payslip") }}</div>
+        <div class="rv-copy-label">{{ t(copy.label) }}</div>
+        <table class="rv-doc-meta">
+          <tr><td class="k">{{ t("Document No.") }}</td><td class="v">{{ r.document }}</td></tr>
+          <tr><td class="k">{{ t("Period") }}</td><td class="v">{{ r.period_label }}</td></tr>
+          <tr><td class="k">{{ t("Issue Date") }}</td><td class="v">{{ d(r.posting_date) }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  {%- if r.is_draft %}<div class="rv-stamp">{{ t("DRAFT - NO LEGAL VALUE") }}</div>{% endif %}
+  {%- if r.is_cancelled %}<div class="rv-stamp">{{ t("CANCELLED") }}</div>{% endif %}
+
+  <!-- ================= EMPLOYEE ================= -->
+  <div class="rv-sec-title">{{ t("Employee") }}</div>
+  <table class="rv-kv">
+    {#- The name gets a full row of its own: Angolan names run to five or six words. -#}
+    <tr>
+      <td class="k">{{ t("Employee Name") }}</td>
+      <td class="v rv-strong" colspan="3">{{ r.employee.nome or "" }}</td>
+    </tr>
+    <tr>
+      <td class="k">{{ t("Employee ID") }}</td><td class="v">{{ val(r.employee.numero_mecanografico) }}</td>
+      <td class="k">NIF</td><td class="v">{{ val(r.employee.n_contribuinte) }}</td>
+    </tr>
+    {#- Employment type, admission date and the payroll period (already in the header)
+        are deliberately not printed (HR review, Sept 2026). -#}
+    <tr>
+      <td class="k">{{ t("Social Security No.") }}</td><td class="v">{{ val(r.employee.n_beneficiario) }}</td>
+      <td class="k">{{ t("Payroll Reference") }}</td><td class="v">{{ val(r.payroll_reference) }}</td>
+    </tr>
+    <tr>
+      <td class="k">{{ t("Category") }}</td><td class="v">{{ val(r.employee.category) }}</td>
+      <td class="k">{{ t("Designation") }}</td><td class="v">{{ val(r.employee.designation) }}</td>
+    </tr>
+    <tr>
+      <td class="k">{{ t("Department") }}</td><td class="v" colspan="3">{{ val(r.employee.departamento) }}</td>
+    </tr>
+  </table>
+
+  <!-- ================= PROCESSING ================= -->
+  <div class="rv-sec-title">{{ t("Processing Information") }}</div>
+  <table class="rv-stats">
+    <tr>
+      <td>
+        <div class="k">{{ t("Processing Period") }}</div>
+        <div class="v">{{ d(r.start_date) }} &ndash; {{ d(r.end_date) }}</div>
+      </td>
+      <td>
+        <div class="k">{{ t("Paid Days") }}</div>
+        <div class="v">{{ qty(r.days.paid) }}</div>
+      </td>
+      <td>
+        <div class="k">{{ t("Total Working Days") }}</div>
+        <div class="v">{{ qty(r.days.total) }}</div>
+      </td>
+      <td>
+        <div class="k">{{ t("Absence Days") }}</div>
+        <div class="v">{{ qty(r.days.absence) }}</div>
+      </td>
+      <td>
+        <div class="k">{{ t("Leave Days") }}</div>
+        <div class="v">{{ qty(r.days.leave) }}</div>
+      </td>
+      {%- if r.days.overtime_hours %}
+      <td>
+        <div class="k">{{ t("Overtime Hours") }}</div>
+        <div class="v">{{ qty(r.days.overtime_hours) }}</div>
+      </td>
+      {%- endif %}
+    </tr>
+  </table>
+
+  <!-- ================= EARNINGS (dynamic, from the slip's own rows) ================= -->
+  {#- The itemised deductions table is deliberately not printed (HR review, Sept 2026):
+      the Summary carries employee INSS, IRT and the total of deductions. -#}
+  {{ lines_table(t("Earnings"), r.earnings, r.memos | selectattr("side", "equalto", "earning") | list,
+                 t("Total Earnings"), r.total_earnings) }}
+
+  {%- if not r.reconciles %}
+  <div class="rv-warn">{{ t("Warning: the printed totals do not reconcile with the processed salary slip. Contact Human Resources.") }}</div>
+  {%- endif %}
+
+  <!-- ================= PAYMENT + SUMMARY ================= -->
+  <table class="rv-bottom">
+    <tr>
+      <td class="rv-pay">
+        <div class="rv-sec-title">{{ t("Payment Information") }}</div>
+        <table class="rv-kv rv-kv-1">
+          <tr>
+            <td class="k">{{ t("Payment Method") }}</td>
+            <td class="v">
+              {%- if r.payment.method == "bank" %}{{ t("Bank Transfer") }}
+              {%- elif r.payment.method == "cash" %}{{ t("Cash") }}
+              {%- elif r.payment.method == "cheque" %}{{ t("Cheque") }}
+              {%- else %}&mdash;{% endif %}
+            </td>
+          </tr>
+          <tr><td class="k">{{ t("Payment Date") }}</td><td class="v">{{ d(r.payment.date) }}</td></tr>
+          <tr><td class="k">{{ t("Currency") }}</td><td class="v">{{ cur }}</td></tr>
+          {%- if r.payment.bank_name %}
+          <tr><td class="k">{{ t("Bank") }}</td><td class="v">{{ r.payment.bank_name }}</td></tr>
+          {%- endif %}
+          {%- if r.payment.iban %}
+          <tr><td class="k">IBAN</td><td class="v rv-mono">{{ r.payment.iban }}</td></tr>
+          {%- endif %}
+          {%- if r.payment.reference %}
+          <tr><td class="k">{{ t("Payment Reference") }}</td><td class="v">{{ r.payment.reference }}</td></tr>
+          {%- endif %}
+        </table>
+      </td>
+      <td class="rv-sum">
+        <div class="rv-sec-title">{{ t("Summary") }}</div>
+        <table class="rv-summary">
+          {#- Gross is not repeated here: it is the Total Earnings above (HR review, Sept 2026). -#}
+          <tr><td class="k">{{ t("Taxable Income") }}</td><td class="v">{{ money(r.summary.taxable) }}</td></tr>
+          <tr><td class="k">{{ t("Employee INSS") }}</td><td class="v">{{ money(r.summary.inss) }}</td></tr>
+          <tr><td class="k">IRT</td><td class="v">{{ money(r.summary.irt) }}</td></tr>
+          <tr><td class="k">{{ t("Total Deductions") }}</td><td class="v">{{ money(r.summary.total_deductions) }}</td></tr>
+          <tr><td class="k">{{ t("Net Salary") }}</td><td class="v">{{ money(r.summary.net) }}</td></tr>
+          <tr class="rv-net">
+            <td class="k">{{ t("TOTAL TO RECEIVE") }} ({{ cur }})</td>
+            <td class="v">{{ money(r.summary.net) }}</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+
+  <!-- ================= EMPLOYEE CONFIRMATION ================= -->
+  <div class="rv-sec-title">{{ t("Employee Confirmation") }}</div>
+  <table class="rv-sign">
+    <tr>
+      <td class="rv-sign-l">
+        <div class="rv-decl">{{ t("I confirm receipt of the amount stated in this payslip.") }}</div>
+        <div class="rv-sign-line"></div>
+        <div class="rv-sign-cap">{{ t("Employee Signature") }}:</div>
+      </td>
+      {#- No date field: the signature line alone (HR review, Sept 2026). -#}
+      <td class="rv-sign-gap"></td>
+    </tr>
+  </table>
+
+  <table class="rv-foot">
+    <tr>
+      <td>{{ t("Computer-processed document.") }}</td>
+      <td class="rv-foot-r">{{ t(copy.label) }} &middot; {{ t("Page") }} {{ page_no }}/{{ page_count }}</td>
+    </tr>
+  </table>
+</div>
+{%- endmacro -%}
+
+<div class="rv">
+  {%- for copy in r.copies %}
+  {{ receipt(copy, loop.index, r.copies | length) }}
+  {%- endfor %}
+</div>

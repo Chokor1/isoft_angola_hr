@@ -519,10 +519,13 @@ SELF_APPROVAL_POLICY = (
 		          "duality, is the control that matters here.",
 	},
 	{
-		"process": "Contract", "same_user": False, "configurable": False,
-		"guard": "contracts.assert_transition — preparer may not approve",
-		"reason": "A contract sets the legal terms of employment. The person who typed the "
-		          "terms should not be the person who accepts them.",
+		"process": "Contract", "same_user": False, "configurable": True,
+		"guard": "contracts.assert_transition; Isoft HR Settings → "
+		         "require_separate_contract_approval",
+		"reason": "A contract sets the legal terms of employment, so by default the person "
+		          "who typed the terms does not also accept them. A department operating "
+		          "the application single-handed can clear the setting; the capability, "
+		          "company scope and state checks are unaffected either way.",
 	},
 	{
 		"process": "Salary change", "same_user": False, "configurable": True,
@@ -558,6 +561,14 @@ SELF_APPROVAL_POLICY = (
 		          "any meaningful sense.",
 	},
 	{
+		"process": "Final settlement", "same_user": False, "configurable": True,
+		"guard": "api._fs_self_approval_allowed; Isoft HR Settings → "
+		         "require_separate_settlement_approval",
+		"reason": "The last payment an employee receives, and the one nobody reviews "
+		          "afterwards. Approving one's own settlement is always refused, whatever "
+		          "the setting says.",
+	},
+	{
 		"process": "Payroll", "same_user": False, "configurable": False,
 		"guard": "payroll_workflow — Payroll Officer → Payroll Manager → Finance",
 		"reason": "Unchanged by HR-operated mode. Preparation, approval and payment stay "
@@ -571,9 +582,20 @@ def self_approval_policy():
 	from isoft_angola_hr.isoft_angola_hr.services import advances
 	from isoft_angola_hr.isoft_angola_hr.services import salary_change
 
+	from isoft_angola_hr.isoft_angola_hr.services import contracts
+
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import (
+		separation_required)
+
+	def _flag(field):
+		# Not get_single_value — see isoft_hr_settings.separation_required.
+		return not separation_required(field)
+
 	live = {
 		"Salary change": not salary_change.requires_separate_approval(),
 		"Salary advance": not advances.requires_separate_approval(),
+		"Contract": not contracts.require_separate_contract_approval(),
+		"Final settlement": _flag("require_separate_settlement_approval"),
 	}
 	rows = []
 	for row in SELF_APPROVAL_POLICY:

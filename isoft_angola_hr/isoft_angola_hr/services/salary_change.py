@@ -45,27 +45,47 @@ REJECT = "reject"
 APPLY = "apply"
 CANCEL = "cancel"
 
+#: The happy path, in order, for the progress strip on screen.
+STAGES = (DRAFT, PENDING_APPROVAL, APPROVED, APPLIED)
+
 _TRANSITIONS = {
 	SUBMIT: {"from": (DRAFT, REJECTED), "to": PENDING_APPROVAL,
 	         "permission": perms.SALARY_CHANGE_REQUEST,
-	         "stamp": ("requested_by", "requested_at"), "label": _("Submit for Approval")},
+	         "stamp": ("requested_by", "requested_at"), "label": "Submit for Approval"},
 	APPROVE: {"from": (PENDING_APPROVAL,), "to": APPROVED,
 	          "permission": perms.SALARY_CHANGE_APPROVE,
-	          "stamp": ("approved_by", "approved_at"), "label": _("Approve Salary Change")},
+	          "stamp": ("approved_by", "approved_at"), "label": "Approve Salary Change"},
 	REJECT: {"from": (PENDING_APPROVAL,), "to": REJECTED,
 	         "permission": perms.SALARY_CHANGE_APPROVE, "stamp": (None, None),
-	         "label": _("Reject Salary Change")},
+	         "label": "Reject Salary Change"},
 	APPLY: {"from": (APPROVED,), "to": APPLIED,
 	        "permission": perms.SALARY_CHANGE_APPROVE, "stamp": (None, None),
-	        "label": _("Apply Salary Change")},
+	        "label": "Apply Salary Change"},
 	CANCEL: {"from": (DRAFT, PENDING_APPROVAL, APPROVED, REJECTED), "to": CANCELLED,
 	         "permission": perms.SALARY_CHANGE_REQUEST, "stamp": (None, None),
-	         "label": _("Cancel")},
+	         "label": "Cancel"},
 }
+
+#: Public alias — the UI summary reads the transition table so a screen can
+#: never describe a workflow differently from the rule that enforces it.
+TRANSITIONS = _TRANSITIONS
 
 
 def state_of(change):
 	return change.get("status") or DRAFT
+
+
+def action_label(action):
+	"""Human label for a transition, taken from the transition table itself so a button
+	can never describe an action differently from the rule that governs it."""
+	spec = _TRANSITIONS.get(action)
+	# Translated HERE — see the note in contracts.action_label.
+	return _(spec["label"]) if spec else action
+
+
+def actions_for(doc, user=None):
+	"""[(action, label)] the user may perform on ``doc`` right now."""
+	return [{"action": a, "label": action_label(a)} for a in allowed_actions(doc, user=user)]
 
 
 def allowed_actions(change, user=None):
@@ -91,9 +111,9 @@ def _is_self_approval(change, user=None):
 
 
 def requires_separate_approval():
-	value = frappe.db.get_single_value("Isoft HR Settings",
-	                                   "require_separate_salary_change_approval")
-	return cint(1 if value is None or value == "" else value)
+	"""See isoft_hr_settings.separation_required for why this is not get_single_value."""
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import separation_required
+	return separation_required("require_separate_salary_change_approval")
 
 
 def assert_transition(change, action, user=None):
@@ -109,7 +129,7 @@ def assert_transition(change, action, user=None):
 			title=_("Invalid State"))
 	if action == APPROVE and _is_self_approval(change, user):
 		frappe.throw(
-			_("Não pode aprovar uma alteração salarial que pediu. A salary change requested "
+			_("You cannot approve a salary change you requested. A salary change requested "
 			  "by {0} must be approved by a different user.").format(change.get("requested_by")),
 			title=_("Self-Approval Blocked"))
 	return spec
@@ -153,16 +173,37 @@ def assert_effective_date_is_a_period_boundary(employee, effective_date, employe
 	from isoft_angola_hr.isoft_angola_hr import api
 
 	effective = getdate(effective_date)
-	start, _end = api._cycle_period(effective)
-	if getdate(start) != effective:
-		frappe.throw(
-			_("A alteração salarial de {0} tem de coincidir com o início de um período de "
-			  "processamento. {1} cai a meio do período que começa em {2}; o motor de "
-			  "processamento não consegue dividir um período entre dois Perfis Salariais. "
-			  "Use {2} (ou o início do período seguinte).").format(
-				frappe.bold(employee_name or employee), effective, getdate(start)),
-			title=_("Effective Date Mid-Period"))
-	return True
+	start, end = api._cycle_period(effective)
+	if getdate(start) == effective:
+		return True
+
+	# The next date that IS a boundary — the day after this period ends. The message used
+	# to offer the start of the period the date already falls inside, which is a date in
+	# the past: HR was told to fix a mid-period change by back-dating it further, which
+	# would have re-priced a period that may already have been paid.
+	next_valid = next_period_start(effective)
+	frappe.throw(
+		_("The salary change for {0} must take effect at the start of a payroll "
+		  "processing period. {1} falls in the middle of the period that starts on {2}. "
+		  "The payroll engine cannot split this period between two Salary Profiles. "
+		  "Use {3}.").format(
+			frappe.bold(employee_name or employee), frappe.format(effective, "Date"),
+			frappe.format(getdate(start), "Date"), frappe.bold(frappe.format(next_valid, "Date"))),
+		title=_("Effective Date Mid-Period"))
+
+
+def next_period_start(after_date):
+	"""The first payroll-period boundary strictly after ``after_date``.
+
+	Derived from the configured cycle rather than assumed: with ``payroll_cycle_start_day``
+	= 1 that is the first of next month, with 23 it is the next 23rd. Nothing here hard-
+	codes a date, so a site that changes its cycle gets the right answer without a code
+	change.
+	"""
+	from isoft_angola_hr.isoft_angola_hr import api
+
+	_start, end = api._cycle_period(getdate(after_date))
+	return add_days(getdate(end), 1)
 
 
 def assert_period_not_already_processed(employee, effective_date):

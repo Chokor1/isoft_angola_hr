@@ -117,6 +117,52 @@ def account_checks(company, settings=None):
 	return out
 
 
+def finance_checklist_checks(company, settings=None, readiness_report=None):
+	"""The Finance approval checklist (nine items) as production-readiness checks.
+
+	Every item is BLOCKED or READY; the mapping-drift item is a WARNING here because
+	history is never rewritten and the decision belongs to Finance, but the approval
+	gate itself treats it as blocking until Finance confirms the mapping.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
+
+	out = []
+	for item in pa.finance_checklist(company, settings, readiness_report=readiness_report,
+	                                 include_readiness=readiness_report is not None):
+		status = READY if item["ok"] else (WARNING if item["key"] == "mapping_drift" else BLOCKED)
+		out.append(_check(
+			"checklist:" + item["key"], item["label"], status,
+			current="; ".join(item["reasons"]) if item["reasons"] else item["detail"],
+			owner=FINANCE if item["key"] != "readiness" else HR,
+			action=None if item["ok"] else (
+				_("The account mapping changed after {0} was posted. Its Journal Entries are "
+				  "not rewritten; decide with Finance which account is correct, keep the "
+				  "mapping stable, and read that run's reconciliation against the accounts "
+				  "its vouchers hold. Finance clears this by confirming the current mapping "
+				  "(Settings → Account mapping history → Confirm current mapping).").format(
+					(pa.last_posted_run(company) or {}).get("name") or "—")
+				if item["key"] == "mapping_drift" else
+				_("Configure in {0}.").format(item["where"]))))
+
+	# The governance record: the last change of a governed mapping after a posted payroll.
+	last_change = frappe.get_all(
+		"Isoft Payroll Account Change", filters={"company": company, "after_posting": 1},
+		fields=["account_key", "label", "changed_by", "changed_on", "old_account", "new_account",
+		        "posted_payroll"],
+		order_by="changed_on desc", limit=1) if frappe.db.exists("DocType", "Isoft Payroll Account Change") else []
+	if last_change:
+		c = last_change[0]
+		out.append(_check(
+			"checklist:last_mapping_change", _("Last account mapping change after a posted payroll"),
+			WARNING, owner=FINANCE,
+			current=_("{0}: {1} → {2}, by {3} on {4} (after {5})").format(
+				c.label or c.account_key, c.old_account or _("(not configured)"),
+				c.new_account or _("(not configured)"), c.changed_by, c.changed_on, c.posted_payroll),
+			action=_("Previous payroll vouchers remain unchanged; new payroll uses the new "
+			         "mapping. Finance confirms the change is intended.")))
+	return out
+
+
 def organisation_checks(company, settings=None):
 	s = settings or frappe.get_cached_doc("Isoft HR Settings")
 	out = []
@@ -272,6 +318,22 @@ def role_checks():
 	# way in Phase 2 — the payroll workflow authorised the action and the Journal Entry
 	# refused it.
 	finance = set(_users_with_role(perms.PAYROLL_FINANCE)) | set(_users_with_role(perms.ACCOUNTS_MANAGER))
+	# Who can actually post and pay under the Finance rule (F-03): a finance role that is
+	# not neutralised by an HR/payroll role. On the ITEC site every Accounts Manager was
+	# also an HR Manager, so "Finance is staffed" was true and nobody could post.
+	effective = sorted(u for u in finance if perms.can(perms.PAYROLL_POST, user=u)
+	                   and perms.can(perms.PAYROLL_CONFIRM_PAYMENT, user=u))
+	neutralised = sorted(finance - set(effective))
+	out.append(_check(
+		"finance_effective", _("Finance users who may post and pay"),
+		READY if effective else BLOCKED,
+		current=_("{0} user(s): {1}").format(len(effective), ", ".join(effective) or "—"),
+		required=_("at least 1"), owner=IT, count=len(effective),
+		action=None if effective else _(
+			"Nobody can post or pay payroll: every Accounts Manager also holds an HR or "
+			"payroll role, which the Finance rule does not accept ({0}). Assign Payroll "
+			"Finance Approver to the Finance person, or remove the HR role from the "
+			"Accounts Manager who is genuinely Finance.").format(", ".join(neutralised) or "—")))
 	accounting = set(_users_with_role("Accounts Manager")) | set(_users_with_role("Accounts User"))
 	without_accounting = sorted(finance - accounting)
 	out.append(_check(
@@ -353,6 +415,15 @@ def get_production_readiness(company=None, on_date=None, light=False):
 	accounts = account_checks(company, settings)
 	sections.append({"key": "accounts", "label": _("Payroll Accounts"),
 	                 "status": _worst(accounts), "checks": accounts})
+	# The readiness report is computed once and shared with the checklist's ninth item.
+	report = None
+	if not light:
+		from isoft_angola_hr.isoft_angola_hr import api
+		start, end = api._default_cycle_period()
+		report = readiness.evaluate(company, start, end, include_variance=False)
+	checklist = finance_checklist_checks(company, settings, readiness_report=report)
+	sections.append({"key": "finance_checklist", "label": _("Finance checklist — before payroll approval"),
+	                 "status": _worst(checklist), "checks": checklist})
 
 	org = organisation_checks(company, settings)
 	sections.append({"key": "organisation", "label": _("Organisation"),
@@ -378,7 +449,7 @@ def get_production_readiness(company=None, on_date=None, light=False):
 	sections.append({"key": "security", "label": _("Roles & Segregation"),
 	                 "status": _worst(security), "checks": security})
 
-	data = data_counts(company) if light else data_checks(company, on_date)
+	data = data_counts(company) if light else data_checks(company, on_date, report=report)
 	sections.append({"key": "data", "label": _("Employee & Payroll Data"),
 	                 "status": _worst(data), "checks": data})
 
@@ -457,16 +528,18 @@ def data_counts(company):
 	]
 
 
-def data_checks(company, on_date=None):
+def data_checks(company, on_date=None, report=None):
 	"""Employee-data readiness, delegated to the monthly readiness engine.
 
 	Uses the period that payroll would actually run next, so the answer is about the
-	real next run rather than an arbitrary window.
+	real next run rather than an arbitrary window. ``report`` lets the caller share one
+	evaluation between this section and the Finance checklist.
 	"""
 	from isoft_angola_hr.isoft_angola_hr import api
 
-	start, end = api._default_cycle_period()
-	report = readiness.evaluate(company, start, end, include_variance=False)
+	if report is None:
+		start, end = api._default_cycle_period()
+		report = readiness.evaluate(company, start, end, include_variance=False)
 	counts = {row["code"]: row["count"] for row in report["summary"]}
 
 	def row(key, label, code, status_when_present, owner, action):

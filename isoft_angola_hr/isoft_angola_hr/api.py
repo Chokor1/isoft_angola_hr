@@ -22,10 +22,33 @@ from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readin
 from isoft_angola_hr.isoft_angola_hr.services import payroll_reconciliation as reconciliation
 from isoft_angola_hr.isoft_angola_hr.services import production_readiness
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts
+from isoft_angola_hr.isoft_angola_hr.services import payroll_approval as approval
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
 
 HR_ROLES = {"HR Manager"}
+
+
+def _json_arg(value, label="data", default=None):
+	"""Decode a JSON argument that arrived over HTTP.
+
+	Every whitelisted method receives its arguments as strings, so each of these call
+	sites was running ``json.loads`` on caller input. A malformed value - an empty field,
+	a half-built payload from a UI bug, a hand-made request - raised JSONDecodeError,
+	which Frappe renders as HTTP 500 with a traceback: a server error blaming the server
+	for the caller's mistake, and a stack trace on the wire. It is a bad request, and it
+	now says so.
+	"""
+	if value is None or value == "":
+		return default
+	if not isinstance(value, str):
+		return value
+	try:
+		return json.loads(value)
+	except (ValueError, TypeError):
+		frappe.throw(_("{0} was not valid JSON.").format(label), title=_("Invalid Request"))
+
 
 
 def _guard(action=perms.HR_ACCESS, company=None):
@@ -87,7 +110,13 @@ def _default_cycle_period():
 def _period_for_month(month, start_day=None):
 	"""Payroll period whose END falls in the given month ('YYYY-MM'). With the cycle start
 	day = 1 that's the whole calendar month; with 23 it's [23 prev month .. 22 this month]."""
-	parts = str(month).split("-")
+	# "YYYY-MM". Splitting without checking meant any other value - an empty field, a
+	# stray "undefined" from the UI - indexed past the end of the list and returned
+	# HTTP 500 with a traceback instead of saying which argument was wrong.
+	parts = str(month or "").split("-")
+	if len(parts) < 2 or not cint(parts[0]) or not 1 <= cint(parts[1]) <= 12:
+		frappe.throw(_("{0} is not a valid month. Expected YYYY-MM.").format(month),
+		             title=_("Invalid Request"))
 	y, m = cint(parts[0]), cint(parts[1])
 	if start_day is None:
 		start_day = cint(frappe.db.get_single_value("Isoft HR Settings", "payroll_cycle_start_day")) or 1
@@ -355,7 +384,7 @@ def list_attendance(company=None, employee=None, from_date=None, to_date=None):
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def mark_attendance(employee, attendance_date, status, working_hours=0, overtime_hours=0,
                     company=None, shift=None):
 	"""Create (or update a draft) Attendance record from the dashboard, then submit it."""
@@ -397,7 +426,7 @@ def get_attendance(name):
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def update_attendance(name, status=None, working_hours=None, overtime_hours=None):
 	"""Edit an existing Attendance record from the dashboard.
 
@@ -463,10 +492,10 @@ def list_occurrences(company=None, employee=None, status=None, from_date=None, t
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_occurrence(data):
 	_guard()
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	authorized = cint(d.get("authorized"))
 	doc = frappe.new_doc("Isoft Attendance Occurrence")
 	doc.update({
@@ -486,7 +515,7 @@ def create_occurrence(data):
 	return doc.name
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def justify_occurrence(name, reason, document=None, remarks=None, extraordinary=0, note=None,
                        justification_source=None):
 	"""Mark an occurrence as Justified with a reason (and optional supporting document).
@@ -518,7 +547,7 @@ def justify_occurrence(name, reason, document=None, remarks=None, extraordinary=
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def set_occurrence_status(name, status):
 	"""Manually set the status (e.g. back to Pending, or straight to Unjustified)."""
 	_guard()
@@ -531,7 +560,7 @@ def set_occurrence_status(name, status):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_occurrence(name):
 	_guard()
 	frappe.delete_doc("Isoft Attendance Occurrence", name, force=1)
@@ -547,7 +576,7 @@ def list_absence_reasons(active_only=0):
 	                      fields=["name", "reason", "is_active"], order_by="reason")
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def save_absence_reason(reason, is_active=1, old_name=None):
 	_guard()
 	if old_name and frappe.db.exists("Isoft Absence Reason", old_name):
@@ -565,7 +594,7 @@ def save_absence_reason(reason, is_active=1, old_name=None):
 	return reason
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_absence_reason(name):
 	_guard()
 	frappe.delete_doc("Isoft Absence Reason", name, force=1)
@@ -586,11 +615,11 @@ def list_leave_types():
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def save_leave_type(data, old_name=None):
 	"""Create or update a Leave Type from the dashboard."""
 	_guard()
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	name = d.get("leave_type_name")
 	if old_name and frappe.db.exists("Leave Type", old_name):
 		doc = frappe.get_doc("Leave Type", old_name)
@@ -610,7 +639,7 @@ def save_leave_type(data, old_name=None):
 	return doc.name
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_leave_type(name):
 	_guard()
 	frappe.delete_doc("Leave Type", name, force=1)
@@ -618,13 +647,13 @@ def delete_leave_type(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def bulk_allocate_leave(leave_type, from_date, to_date, new_leaves_allocated,
                         carry_forward=0, employees=None, company=None):
 	"""Allocate the same leave entitlement to many employees at once. Skips employees who
 	already have an allocation for this leave type overlapping the period."""
 	_guard()
-	sel = json.loads(employees) if isinstance(employees, str) and employees else (employees or None)
+	sel = _json_arg(employees, "employees")
 	if sel:
 		emps = list(sel)
 	else:
@@ -715,7 +744,7 @@ def list_leaves(company=None, employee=None, status=None, from_date=None, to_dat
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_leave(data):
 	"""Create a Leave Application (Open/draft) from the dashboard.
 
@@ -730,7 +759,7 @@ def create_leave(data):
 	_guard()
 	from isoft_angola_hr.isoft_angola_hr.services import hr_operations as hr_ops
 
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	company = d.get("company") or frappe.db.get_value("Employee", d.get("employee"), "company")
 	doc = frappe.new_doc("Leave Application")
 	doc.update({
@@ -777,7 +806,7 @@ def reject_leave(name):
 	return _finalize_leave(name, "Rejected")
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def cancel_leave(name):
 	_guard()
 	doc = frappe.get_doc("Leave Application", name)
@@ -787,7 +816,7 @@ def cancel_leave(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_leave(name):
 	_guard()
 	doc = frappe.get_doc("Leave Application", name)
@@ -821,11 +850,11 @@ def list_leave_allocations(company=None, employee=None, leave_type=None):
 	)
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_leave_allocation(data):
 	"""Create + submit a Leave Allocation (gives the employee a balance to request against)."""
 	_guard()
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	company = d.get("company") or frappe.db.get_value("Employee", d.get("employee"), "company")
 	doc = frappe.new_doc("Leave Allocation")
 	doc.update({
@@ -843,7 +872,7 @@ def create_leave_allocation(data):
 	return doc.name
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_leave_allocation(name):
 	_guard()
 	doc = frappe.get_doc("Leave Allocation", name)
@@ -854,7 +883,7 @@ def delete_leave_allocation(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def bulk_mark_attendance(attendance_date, rows, company=None):
 	"""Mark attendance for many employees at once for a single day. `rows` is a list of
 	{employee, status, working_hours, overtime_hours}. Everyone defaults to Present in the
@@ -864,7 +893,7 @@ def bulk_mark_attendance(attendance_date, rows, company=None):
 	date = getdate(attendance_date)
 	if date.weekday() == 6:  # Sunday
 		frappe.throw(_("{0} is a Sunday (non-working day).").format(date))
-	rows = json.loads(rows) if isinstance(rows, str) else rows
+	rows = _json_arg(rows, "rows", default=[])
 	created, skipped, errors = 0, 0, []
 	for r in rows:
 		emp = r.get("employee")
@@ -934,18 +963,44 @@ def list_salary_history(employee=None, salary_profile=None):
 		filters["employee"] = employee
 	if salary_profile:
 		filters["salary_profile"] = salary_profile
-	return frappe.get_all(
+	rows = frappe.get_all(
 		"Isoft Salary History", filters=filters,
-		fields=["name", "employee", "employee_name", "salary_profile", "change_date", "changed_by",
-		        "change_type", "base", "food_allowance", "transport_allowance", "family_allowance"],
-		order_by="change_date desc", limit_page_length=200,
+		fields=["name", "employee", "employee_name", "salary_profile", "from_date",
+		        "change_date", "changed_by", "change_type", "base", "food_allowance",
+		        "transport_allowance", "family_allowance"],
+		# Effective date first: two edits made on the same afternoon can take effect months
+		# apart, and it is the effective order that describes the pay progression.
+		order_by="from_date desc, change_date desc", limit_page_length=200,
 	)
 
+	# The effective END of each salary, so HR can read a history as periods rather than as
+	# a list of edits. It comes from the Salary Profile the row belongs to — never
+	# inferred from the next row, which would invent an end date the records do not have.
+	profiles = {r.get("salary_profile") for r in rows if r.get("salary_profile")}
+	to_dates = {}
+	if profiles:
+		to_dates = {
+			d.name: d.to_date
+			for d in frappe.get_all("Isoft Salary Profile",
+			                        filters={"name": ["in", list(profiles)]},
+			                        fields=["name", "to_date"])
+		}
+	currency = frappe.db.get_single_value("Isoft HR Settings", "currency")
+	for r in rows:
+		r["to_date"] = to_dates.get(r.get("salary_profile"))
+		r["currency"] = currency
+		# A row rebuilt from the Version log is evidence of what happened, not a record
+		# made at the time. It must stay distinguishable for good.
+		r["is_reconstructed"] = "reconstru" in (r.get("change_type") or "")
+		r["source"] = _("Reconstructed from version log") if r["is_reconstructed"] \
+			else _("Recorded when it happened")
+	return rows
 
-@frappe.whitelist()
+
+@frappe.whitelist(methods=["POST"])
 def save_salary_profile(data):
 	_guard(perms.SALARY_PROFILE_WRITE)
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	if d.get("name") and frappe.db.exists("Isoft Salary Profile", d["name"]):
 		doc = frappe.get_doc("Isoft Salary Profile", d["name"])
 	else:
@@ -1059,14 +1114,48 @@ def get_preview_columns():
 			m = dict(c)
 			m["visible"] = 1
 			ordered.append(m)
+	_label_days_column(ordered)
 	return ordered
 
 
 @frappe.whitelist()
+def payroll_calendar_trace(employee, start_date, end_date):
+	"""Date-by-date explanation of an employee's working days for a period. Read-only.
+
+	Exists because "why does this person have two days more than that one?" was, until
+	now, a question only answerable by reading the source. It reports the Shift Type and
+	the Holiday List that were actually used, where each came from, and what every single
+	date contributed.
+	"""
+	_guard(perms.PAYROLL_PREVIEW)
+	from isoft_angola_hr.isoft_angola_hr.services import work_calendar
+
+	return work_calendar.explain(employee, start_date, end_date)
+
+
+def _label_days_column(columns):
+	"""Name the Paid/Total column after the unit it is actually carrying.
+
+	Under the hour-equivalent basis the figure is hours ÷ standard day, so a 9.5-hour
+	shift shows 28.625 in a 27-working-day month. Calling that "Days" is what made the
+	number look like a bug; it is only a bug when the label and the unit disagree.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
+		counts_in_days,
+	)
+
+	if counts_in_days():
+		return
+	for c in columns:
+		if c.get("key") == "days":
+			c["label"] = _("Paid/Total (day-equivalents)")
+
+
+@frappe.whitelist(methods=["POST"])
 def save_preview_columns(columns):
 	"""Persist the preview column order + visibility (list of {key, visible})."""
 	_guard(perms.PAYROLL_PREVIEW)
-	cols = json.loads(columns) if isinstance(columns, str) else columns
+	cols = _json_arg(columns, "columns", default=[])
 	clean = [{"key": c["key"], "visible": 1 if c.get("visible") else 0}
 	         for c in cols if c.get("key") in _PREVIEW_META]
 	settings = frappe.get_single("Isoft HR Settings")
@@ -1110,7 +1199,7 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 	)
 	from isoft_angola_hr.isoft_angola_hr.payroll import engine
 
-	inputs = (json.loads(inputs) if isinstance(inputs, str) else inputs) or {}
+	inputs = (_json_arg(inputs, "inputs", default={})) or {}
 	start, end = getdate(start_date), getdate(end_date)
 	filters = {"status": "Active"}
 	if company:
@@ -1148,9 +1237,16 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		# Defaults: Férias is paid only when HR ticks the employee (default 0); the tick
 		# fills the full amount (ferias_full). Natal defaults to the December-prorated
 		# amount and is editable per employee.
-		ferias_full = engine.ferias_full(prof.base, settings.ferias_rate)
-		natal_default = engine.default_natal(prof.base, settings.natal_rate, e.date_of_joining, end,
-		                                     settings.get("natal_payment_month"))
+		# Proposed only if the component is actually switched on. The defaults used to be
+		# computed from the rate alone, so a site with enable_natal cleared saw a full
+		# December 13th month in the preview and then had every single slip refused by
+		# IsoftSalarySlip.validate_enabled_components. A preview that proposes a figure
+		# the save rejects is worse than one that proposes nothing.
+		ferias_full = (engine.ferias_full(prof.base, settings.ferias_rate)
+		               if engine.component_enabled(settings, "SFE") else 0.0)
+		natal_default = (engine.default_natal(prof.base, settings.natal_rate, e.date_of_joining,
+		                                      end, settings.get("natal_payment_month"))
+		                 if engine.component_enabled(settings, "SNA") else 0.0)
 		# Overtime defaults to the amount computed from logged Attendance overtime hours
 		# (when validating attendance); HR can override it in the preview.
 		ot_default = (attendance_overtime_amount(e.name, prof.base, twd, start, end, settings.overtime_multiplier)
@@ -1225,7 +1321,7 @@ def create_payroll_from_preview(company, start_date, end_date, rows, posting_dat
 	_guard(perms.PAYROLL_PREPARE, company)
 	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import get_active_profile
 
-	rows = json.loads(rows) if isinstance(rows, str) else rows
+	rows = _json_arg(rows, "rows", default=[])
 	if not rows:
 		frappe.throw(_("No employees to process."))
 
@@ -1303,42 +1399,19 @@ def export_payroll_preview(company, start_date, end_date, department=None, branc
 	fname = "PayrollPreview_{0}_{1}".format(start_date, end_date)
 
 	if file_format == "pdf":
-		from frappe.utils.pdf import get_pdf
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_print
 
 		def money(v):
 			return frappe.utils.fmt_money(flt(v), currency=currency)
 
-		head = "".join("<th style='{0}'>{1}</th>".format(
-			"text-align:right;" if m else "text-align:left;", _(l)) for (l, k, m) in cols)
-		body = ""
-		for r in rows:
-			tds = ""
-			for (l, k, m) in cols:
-				v = cell(r, k)
-				tds += "<td style='{0}'>{1}</td>".format(
-					"text-align:right;" if m else "text-align:left;",
-					money(v) if m else frappe.utils.escape_html(str(v)))
-			body += "<tr>{0}</tr>".format(tds)
-		tfoot = ""
-		for i, (l, k, m) in enumerate(cols):
-			if i == 0:
-				tfoot += "<td><b>{0}</b></td>".format(_("TOTAL"))
-			elif m:
-				tfoot += "<td style='text-align:right;'><b>{0}</b></td>".format(money(totals[k]))
-			else:
-				tfoot += "<td></td>"
-		html = """
-		<div style="font-family:Arial,sans-serif;font-size:11px;">
-			<h3 style="margin:0 0 2px;">{title}</h3>
-			<div style="color:#666;margin-bottom:10px;">{sub} — {n} {emp}</div>
-			<table style="width:100%;border-collapse:collapse;" border="1" cellpadding="5">
-				<thead style="background:#f0f4fa;">{head}</thead>
-				<tbody>{body}</tbody>
-				<tfoot style="background:#f0f4fa;"><tr>{tfoot}</tr></tfoot>
-			</table>
-		</div>""".format(title=frappe.utils.escape_html(title), sub=_("Payroll Preview"),
-		                 n=len(rows), emp=_("employees"), head=head, body=body, tfoot=tfoot)
-		content = get_pdf(html, options={"orientation": "Landscape"})
+		def flag(r):
+			# the preview dims a row whose slip already exists; the print keeps that
+			# distinction, because it changes what the reader is allowed to conclude
+			return "already" if r.get("already") else ""
+
+		content, _plan = payroll_print.build(
+			columns=cols, rows=rows, totals=totals, value_of=cell, money=money,
+			company=company, period_label=period, flag_of=flag)
 		mime, ext = "application/pdf", "pdf"
 	else:
 		from frappe.utils.xlsxutils import make_xlsx
@@ -1404,28 +1477,39 @@ def _assert_posting_authorized(slip):
 	"""
 	entry = _payroll_entry_of(slip)
 	if not entry:
-		# A standalone slip (no payroll run) has no approval to check. It still requires
-		# the posting role and a submitted slip, and it is not the normal path.
-		return None
+		# A slip outside any payroll run has no approval to check — so it cannot be
+		# posted at all. It used to be waved through here ("not the normal path"), which
+		# let an HR Manager submit a hand-made slip and Finance book and pay it with no
+		# approval anywhere. Slips can no longer be created without a run
+		# (IsoftSalarySlip.validate_belongs_to_run); this covers anything older.
+		frappe.throw(
+			_("Salary slip {0} does not belong to a payroll run and cannot be posted.").format(
+				frappe.bold(slip.name)), frappe.PermissionError, title=_("Not Part of a Payroll Run"))
 	perms.require_company(entry.company)
+	# Finance only, and never the person who prepared the run (F-03).
+	wf.check_actor(entry, wf.POST)
 	state = wf.state_of(entry)
 	if state not in (wf.APPROVED, wf.POSTED, wf.PAYMENT_READY, wf.PAID):
 		frappe.throw(
-			_("O processamento salarial {0} ainda não foi aprovado (estado: {1}). Não é "
-			  "possível contabilizar payroll não aprovado.").format(frappe.bold(entry.name), _(state)),
+			_("Payroll {0} has not been approved yet (state: {1}). Unapproved payroll "
+			  "cannot be posted to the ledger.").format(frappe.bold(entry.name), _(state)),
 			title=_("Payroll Not Approved"))
+	wf.assert_slip_in_run(entry.name, slip.name)
 	if state == wf.APPROVED:
 		wf.assert_approval_intact(entry)
 	return entry
 
 
 def _assert_payment_authorized(slip):
-	"""Payment requires an approved, posted and released payroll — plus a payment
-	authoriser who is not the person who approved it."""
+	"""Payment requires an approved, posted and released payroll that lists the slip —
+	plus a payment authoriser who is not the person who approved it."""
 	entry = _payroll_entry_of(slip)
 	if not entry:
-		return None
+		frappe.throw(
+			_("Salary slip {0} does not belong to a payroll run and cannot be paid.").format(
+				frappe.bold(slip.name)), frappe.PermissionError, title=_("Not Part of a Payroll Run"))
 	wf.assert_can_pay(entry)
+	wf.assert_slip_in_run(entry.name, slip.name)
 	return entry
 
 
@@ -1468,6 +1552,8 @@ def make_journal_entry(salary_slip):
 	existing = _existing_entry(slip.name, "journal_entry")
 	if existing:
 		return existing
+	# F-04: every account this slip's lines need must be usable BEFORE a voucher exists.
+	payroll_accounts.assert_postable([slip])
 	if flt(slip.net_pay) < 0:
 		frappe.throw(
 			_("Net pay for {0} is negative ({1}). Correct the slip before posting it.").format(
@@ -1529,6 +1615,15 @@ def make_journal_entry(salary_slip):
 			  "Set them under Settings -> Account per Component.").format(", ".join(sorted(set(missing))))
 		)
 
+	# Posted by the application on behalf of an already-authorised action, not by the user
+	# browsing to Journal Entry. The capability layer decided this above
+	# (perms.PAYROLL_POST), so re-checking the raw DocType permission here would
+	# require every payroll poster to also hold blanket Journal Entry rights. That is the
+	# opposite of least privilege: Payroll Finance Approver — the role this app creates
+	# precisely to post payroll — would need full accounting access to do its own job,
+	# while still being unable to post payroll without it. Scoping stays where it belongs:
+	# this voucher can only be produced through the payroll flow that authorised it.
+	je.flags.ignore_permissions = True
 	je.insert()
 	je.submit()
 	slip.db_set("journal_entry", je.name)
@@ -1558,6 +1653,7 @@ def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
 			  "clears a payable that actually exists in the ledger.").format(
 				frappe.bold(slip.employee_name or slip.employee))
 		)
+	payroll_accounts.assert_payable([slip], payment_account=payment_account)
 
 	s = frappe.get_single("Isoft HR Settings")
 	pay_acc = payment_account or s.get("salary_payment_account")
@@ -1587,6 +1683,15 @@ def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
 		"account": pay_acc, "cost_center": cost_center,
 		"credit_in_account_currency": flt(slip.net_pay),
 	})
+	# Posted by the application on behalf of an already-authorised action, not by the user
+	# browsing to Journal Entry. The capability layer decided this above
+	# (perms.PAYROLL_CONFIRM_PAYMENT), so re-checking the raw DocType permission here would
+	# require every payroll poster to also hold blanket Journal Entry rights. That is the
+	# opposite of least privilege: Payroll Finance Approver — the role this app creates
+	# precisely to post payroll — would need full accounting access to do its own job,
+	# while still being unable to post payroll without it. Scoping stays where it belongs:
+	# this voucher can only be produced through the payroll flow that authorised it.
+	je.flags.ignore_permissions = True
 	je.insert()
 	je.submit()
 	slip.db_set("payment_entry", je.name)
@@ -1614,7 +1719,8 @@ def unlink_cancelled_payroll_entry(doc, method=None):
 def _entry_slip_names(name, employees=None):
 	"""Salary slip names for a payroll entry, optionally limited to selected employees."""
 	entry = frappe.get_doc("Isoft Payroll Entry", name)
-	sel = set(json.loads(employees)) if isinstance(employees, str) and employees else (set(employees) if employees else None)
+	_sel = _json_arg(employees, "employees")
+	sel = set(_sel) if _sel else None
 	out = []
 	for r in entry.employees:
 		if not r.salary_slip:
@@ -1635,21 +1741,30 @@ def make_bulk_journal_entry(name, employees=None):
 	"""
 	_guard(perms.PAYROLL_POST)
 	entry = frappe.get_doc("Isoft Payroll Entry", name)
+	perms.require_company(entry.company)
+	wf.check_actor(entry, wf.POST)
 	if wf.state_of(entry) == wf.APPROVED:
 		wf.assert_can_post(entry)
 	elif wf.state_of(entry) != wf.POSTED:
 		frappe.throw(
-			_("O processamento salarial ainda não foi aprovado (estado: {0}).").format(
+			_("The payroll has not been approved yet (state: {0}).").format(
 				_(wf.state_of(entry))), title=_("Payroll Not Approved"))
 
 	created, skipped, errors = 0, 0, []
+	pending = []
 	for sname in _entry_slip_names(name, employees):
 		slip = frappe.get_doc("Isoft Salary Slip", sname)
 		if slip.docstatus != 1 or (slip.journal_entry and frappe.db.exists("Journal Entry", slip.journal_entry)):
 			skipped += 1
 			continue
+		pending.append(slip)
+	# F-04: the whole run is checked against the account mapping before the first
+	# Journal Entry is written. Previously a missing account surfaced on the first
+	# employee that used it, after the employees before them had already been booked.
+	payroll_accounts.assert_postable(pending)
+	for slip in pending:
 		try:
-			make_journal_entry(sname)
+			make_journal_entry(slip.name)
 			created += 1
 		except Exception as e:
 			errors.append(f"{slip.employee_name}: {str(e)}")
@@ -1686,11 +1801,16 @@ def make_bulk_payment_entry(name, payment_account=None, posting_date=None, emplo
 	entry = frappe.get_doc("Isoft Payroll Entry", name)
 	wf.assert_can_pay(entry)
 	created, skipped, total, errors = 0, 0, 0.0, []
+	pending = []
 	for sname in _entry_slip_names(name, employees):
 		slip = frappe.get_doc("Isoft Salary Slip", sname)
 		if slip.docstatus != 1 or (slip.payment_entry and frappe.db.exists("Journal Entry", slip.payment_entry)):
 			skipped += 1
 			continue
+		pending.append(slip)
+	payroll_accounts.assert_payable(pending, payment_account=payment_account)
+	for slip in pending:
+		sname = slip.name
 		try:
 			make_payment_entry(sname, payment_account=payment_account, posting_date=posting_date,
 			                   bank_reference=bank_reference)
@@ -1766,17 +1886,40 @@ def payroll_action(name, action, reason=None):
 	"""
 	entry = frappe.get_doc("Isoft Payroll Entry", name)
 
+	# POST and PAY are not state changes — they are the act of writing to the ledger, and
+	# make_bulk_journal_entry / make_bulk_payment_entry perform the transition themselves
+	# once every slip actually carries a submitted entry. Allowing them here let a direct
+	# API call mark a payroll Posted and Paid with no accounting behind it: the status
+	# claimed the money had moved when nothing had been written. The UI never sends these
+	# two through this endpoint, so refusing them changes no supported flow.
+	if action in (wf.POST, wf.PAY):
+		frappe.throw(
+			_("{0} cannot be performed as a status change. Use {1}, which posts the "
+			  "entries and moves the payroll only once every slip carries a submitted "
+			  "ledger entry.").format(
+				_("Posting") if action == wf.POST else _("Payment"),
+				"make_bulk_journal_entry" if action == wf.POST else "make_bulk_payment_entry"),
+			title=_("Use the posting endpoint"))
+
 	if action == wf.SUBMIT_FOR_APPROVAL:
 		# Blocking exceptions must be cleared BEFORE an approver is asked to look at it.
 		wf.assert_transition(entry, action)
+		# The full approval gate runs first, in business language, so the preparer learns
+		# what Finance or HR still has to fix before an approver is asked to look at the
+		# run; the period-level readiness gate follows for anything it covers alone.
+		approval.assert_approvable(entry)
 		readiness.assert_ready_to_submit(entry)
+	elif action == wf.APPROVE:
+		# Approval freezes the numbers and hands them to Finance: every account the run
+		# will post to, every salary structure and every slip must be in order NOW.
+		wf.assert_transition(entry, action)
+		approval.assert_approvable(entry)
 	elif action == wf.RELEASE_FOR_PAYMENT:
 		wf.assert_transition(entry, action)
 		blockers = readiness.payment_blockers(entry)
 		if blockers:
 			frappe.throw(
-				_("Não é possível libertar o pagamento enquanto existirem colaboradores sem "
-				  "IBAN ({0}): {1}.").format(
+				_("Payment cannot be released while {0} employee(s) have no IBAN: {1}.").format(
 					len(blockers), ", ".join(b["employee_name"] or b["employee"] for b in blockers[:10])),
 				title=_("Payment Blocked"))
 	elif action == wf.CLOSE:
@@ -1823,6 +1966,16 @@ def payroll_approval_summary(name):
 	perms.require_company(entry.company)
 	summary = entry.approval_summary()
 	summary["payment_blockers"] = readiness.payment_blockers(entry)
+	# The approval gate, for the screen: READY or BLOCKED with the reasons in business
+	# language. Rendered only while the run is still before approval; the server
+	# re-checks on submit and approve whatever the screen showed.
+	if wf.state_of(entry) in (wf.DRAFT, wf.CALCULATED, wf.PENDING_APPROVAL, wf.REJECTED):
+		try:
+			summary["approval_gate"] = approval.approval_gate(entry)
+		except frappe.PermissionError:
+			summary["approval_gate"] = None
+	else:
+		summary["approval_gate"] = None
 	return summary
 
 
@@ -1855,6 +2008,78 @@ def get_production_readiness(company=None, on_date=None):
 	"""Deployment-level readiness: configuration, statutory setup, roles and data."""
 	return production_readiness.get_production_readiness(company=_default_company(company),
 	                                                     on_date=on_date)
+
+
+@frappe.whitelist()
+def finance_approval_checklist(company=None, name=None):
+	"""The Finance approval checklist: READY or BLOCKED, with the exact reasons.
+
+	``name`` scopes the readiness item to one payroll run; without it the next payroll
+	period is assessed. Readable by anyone who may read payroll — HR has to see WHY the
+	run is stuck, even though only Finance can fix it.
+	"""
+	_guard(perms.PAYROLL_READ)
+	entry = None
+	if name:
+		entry = frappe.get_doc("Isoft Payroll Entry", name)
+		company = entry.company
+	company = _default_company(company)
+	perms.require_company(company)
+	return payroll_accounts.finance_approval_status(company, entry=entry)
+
+
+@frappe.whitelist()
+def payroll_account_history(company=None, limit=50):
+	"""Who changed which payroll account mapping, when, from what to what — and whether a
+	payroll had already been posted under the old mapping. Also whether the mapping in
+	force has drifted from the last posted run, and whether Finance has confirmed it."""
+	_guard(perms.PAYROLL_READ)
+	company = _default_company(company)
+	perms.require_company(company)
+	filters = {"company": company} if company else {}
+	rows = frappe.get_all(
+		"Isoft Payroll Account Change", filters=filters,
+		fields=["name", "account_key", "label", "changed_by", "changed_on", "old_account",
+		        "new_account", "after_posting", "posted_payroll", "note"],
+		order_by="changed_on desc, name desc", limit=cint(limit) or 50)
+	last, drift = payroll_accounts.drift_against_last_posted(company)
+	drifted = bool(last and drift and drift["drifted"])
+	confirmation = payroll_accounts.drift_confirmed(company, last) if drifted else None
+	return {
+		"rows": rows,
+		"last_posted": last.name if last else None,
+		"drifted": drifted,
+		"drift": drift,
+		"confirmed": confirmation,
+		# Confirming is a Finance act: the same capability (and Finance rule) as posting.
+		"can_confirm": bool(perms.can(perms.PAYROLL_POST)),
+		"snapshot": payroll_accounts.mapping_snapshot(),
+	}
+
+
+@frappe.whitelist(methods=["POST"])
+def confirm_account_mapping(note=None):
+	"""Finance confirms, on record, that the payroll account mapping in force is the one
+	intended — which is what clears the drift blocker after a run was booked under an
+	earlier mapping. Nothing is changed: no account, no voucher, no payroll."""
+	_guard(perms.PAYROLL_POST)
+	company = _default_company()
+	perms.require_company(company)
+	last = payroll_accounts.last_posted_run(company)
+	doc = frappe.get_doc({
+		"doctype": "Isoft Payroll Account Change", "company": company,
+		"account_key": payroll_accounts.MAPPING_CONFIRMED,
+		"label": _("Finance confirmed the current account mapping") + (
+			" — " + frappe.utils.strip_html(note)[:140] if note else ""),
+		"changed_by": frappe.session.user, "changed_on": frappe.utils.now(),
+		"after_posting": 1 if last else 0, "posted_payroll": last.name if last else None,
+		"note": payroll_accounts.mapping_snapshot(),
+	})
+	doc.flags.ignore_permissions = True
+	doc.insert()
+	frappe.db.commit()
+	return {"name": doc.name, "confirmed_by": doc.changed_by, "confirmed_on": doc.changed_on,
+	        "last_posted": doc.posted_payroll}
 
 
 @frappe.whitelist()
@@ -2001,7 +2226,7 @@ def _assert_no_entries(slip_doc):
 		frappe.throw(_("Cannot delete {0}: delete its {1} first.").format(slip_doc.name, parts))
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def cancel_salary_slip(name):
 	_guard(perms.PAYROLL_CANCEL)
 	doc = frappe.get_doc("Isoft Salary Slip", name)
@@ -2011,7 +2236,7 @@ def cancel_salary_slip(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_salary_slip(name):
 	_guard(perms.PAYROLL_CANCEL)
 	doc = frappe.get_doc("Isoft Salary Slip", name)
@@ -2023,7 +2248,7 @@ def delete_salary_slip(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def cancel_payroll_entry(name):
 	"""Cancel the payroll run: cancel its submitted salary slips and mark it Cancelled.
 
@@ -2057,7 +2282,7 @@ def cancel_payroll_entry(name):
 	return n
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_payroll_entry(name):
 	"""Cancel + delete the entry's salary slips, then delete the entry.
 
@@ -2287,7 +2512,7 @@ def settlement_preview(data):
 	_guard(perms.PAYROLL_PREVIEW)
 	from isoft_angola_hr.isoft_angola_hr.payroll import settlement as fs
 
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	res = fs.compute(_engine_inputs(d))
 	res["payment_deadline"] = fs.payment_deadline(d.get("termination_date"),
 	                                              d.get("reason_key") or None)
@@ -2339,12 +2564,12 @@ _SETTLEMENT_DERIVED = [
 ]
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_settlement(data):
 	"""Create a draft Final Settlement from the dashboard form."""
 	_guard(perms.PAYROLL_PREPARE)
 	from isoft_angola_hr.isoft_angola_hr.payroll import settlement as fs
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	doc = frappe.new_doc("Isoft Final Settlement")
 	for f in _SETTLEMENT_FIELDS:
 		if f in d and d.get(f) not in (None, ""):
@@ -2363,7 +2588,7 @@ def create_settlement(data):
 def update_settlement(name, data):
 	"""Edit a draft (or rejected) settlement and recompute it."""
 	_guard(perms.PAYROLL_PREPARE)
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	doc = frappe.get_doc("Isoft Final Settlement", name)
 	if doc.docstatus != 0 or doc.workflow_status not in ("Draft", "Rejected"):
 		frappe.throw(_("Only a draft or rejected settlement can be edited. This one is {0}.")
@@ -2441,6 +2666,17 @@ def get_settlement(name):
 		out["flags"] = res["flags"]
 		out["leave"] = res["leave"]
 		out["supplements"] = res["supplements"]
+		# The totals must come from the SAME computation as the breakdown. Reading them
+		# from the stored fields instead left a draft settlement showing a full, correct
+		# line-by-line trace under a blank Gross and Net — and, once stored values existed,
+		# risked showing a header that disagreed with the lines beneath it.
+		for key in ("gross", "net", "total_deductions", "statutory_deductions",
+		            "other_deductions", "shortfall", "inss", "inss_employer", "irt",
+		            "inss_base", "irt_base", "irt_gross", "monthly_remuneration",
+		            "advance_outstanding", "advance_recovered", "advance_deferred",
+		            "seniority_years"):
+			if key in res:
+				out[key] = res[key]
 	out["payment_deadline"] = fs.payment_deadline(
 		doc.termination_date, doc.reason_key or law.LEGACY_REASON_MAP.get(doc.reason or ""))
 	out["actions"] = _settlement_actions(doc)
@@ -2493,13 +2729,41 @@ _FS_TRANSITIONS = {
 }
 
 
+def _fs_approval_refusal(doc, user=None):
+	"""Why this user may NOT approve this settlement — or None if they may.
+
+	ONE definition, called by both the action list the screen renders and the transition
+	the server performs. They used to answer separately: the server refused a preparer's
+	own approval and refused another company's settlement, while the action list checked
+	neither, so the screen offered an Approve button that the click then rejected. That
+	is the same defect contracts had, and it teaches people to distrust the buttons.
+	"""
+	user = user or frappe.session.user
+	if not perms.can_company(doc.get("company"), user=user):
+		return _("This settlement belongs to {0}.").format(doc.get("company"))
+	if doc.get("owner") == user and not _fs_self_approval_allowed():
+		return _("The settlement was prepared by you. Approval must be given by "
+		         "somebody else.")
+	if doc.get("employee") and frappe.db.get_value(
+			"Employee", doc.get("employee"), "user_id") == user:
+		return _("You cannot approve your own final settlement.")
+	return None
+
+
 def _settlement_actions(doc):
 	"""Which transitions this user may perform on this settlement, right now."""
 	state = doc.workflow_status or "Draft"
 	out = []
 	for action, (states, permission, _nxt) in _FS_TRANSITIONS.items():
-		if state in states and perms.can(permission):
-			out.append(action)
+		if state not in states or not perms.can(permission):
+			continue
+		# Company scope gates every transition, not just approval: the server checks it
+		# in _fs_transition via _guard(..., company=...).
+		if not perms.can_company(doc.get("company")):
+			continue
+		if action == "approve" and _fs_approval_refusal(doc):
+			continue
+		out.append(action)
 	if state in ("Draft", "Rejected") and perms.can(perms.PAYROLL_PREPARE):
 		out.append("edit")
 		out.append("recalculate")
@@ -2520,12 +2784,12 @@ def _fs_transition(name, action, **kw):
 	if state not in states:
 		frappe.throw(_("A settlement in {0} cannot be {1}. Expected {2}.").format(
 			state, action.replace("_", " "), " or ".join(states)))
-	# Nobody approves their own settlement.
-	if action == "approve" and doc.owner == frappe.session.user 		and not _fs_self_approval_allowed():
-		frappe.throw(_("The settlement was prepared by you. Approval must be given by "
-		               "somebody else."))
-	if action == "approve" and doc.employee 		and frappe.db.get_value("Employee", doc.employee, "user_id") == frappe.session.user:
-		frappe.throw(_("You cannot approve your own final settlement."))
+	# Nobody approves their own settlement. Same helper the action list uses, so the
+	# button and the click can never disagree.
+	if action == "approve":
+		refusal = _fs_approval_refusal(doc)
+		if refusal:
+			frappe.throw(refusal)
 	doc.workflow_status = nxt
 	for k, v in kw.items():
 		doc.set(k, v)
@@ -2534,11 +2798,24 @@ def _fs_transition(name, action, **kw):
 
 
 def _fs_self_approval_allowed():
-	from isoft_angola_hr.isoft_angola_hr.services import advances
-	try:
-		return not advances.requires_separate_approval()
-	except Exception:
-		return False
+	"""Whether the person who prepared a settlement may also approve it.
+
+	This used to read the ADVANCE switch, so turning advances self-approvable silently did
+	the same to final settlements — a control changing on its own, out of sight. It now has
+	its own setting, defaulting to requiring a second person.
+
+	The value is read from the stored Singles row rather than through
+	``get_single_value``, which casts a Check to 0 and so reports "never configured" and
+	"deliberately switched off" as the same thing. That made the fail-closed branch below
+	unreachable: a site where the field had never been set read as separation OFF, which
+	is the opposite of the intended default and exactly backwards for a control whose
+	whole purpose is to require a second person. An absent row now means the separation
+	stands; only an explicit 0 relaxes it.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import (
+		separation_required)
+
+	return not separation_required("require_separate_settlement_approval")
 
 
 @frappe.whitelist()
@@ -2594,7 +2871,7 @@ def recalculate_settlement(name, confirm=0):
 	        "net": flt(doc.net_payable)}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def submit_settlement(name):
 	"""Finalise the settlement (submits it; the controller marks the employee as Left)."""
 	_guard()
@@ -2605,7 +2882,7 @@ def submit_settlement(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def cancel_settlement(name):
 	_guard()
 	doc = frappe.get_doc("Isoft Final Settlement", name)
@@ -2618,7 +2895,7 @@ def cancel_settlement(name):
 	return True
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def delete_settlement(name):
 	_guard(perms.PAYROLL_CANCEL)
 	doc = frappe.get_doc("Isoft Final Settlement", name)
@@ -2808,7 +3085,7 @@ def save_irt_table(brackets, effective_from=None, title=None):
 	payroll (enforced by IRTTable.validate).
 	"""
 	_guard(perms.STATUTORY_WRITE)
-	rows = json.loads(brackets) if isinstance(brackets, str) else brackets
+	rows = _json_arg(brackets, "brackets", default=[])
 	current = frappe.get_doc("IRT Table", _default_irt_name())
 
 	new_version = bool(effective_from) and getdate(effective_from) != getdate(current.effective_from)
@@ -2856,7 +3133,39 @@ def get_settings(company=None):
 		"ferias_rate", "natal_rate", "natal_payment_month",
 		"settlement_salary_days", "settlement_leave_days",
 		"enable_productivity_bonus", "enable_overtime", "enable_adiantamento", "enable_family_allowance",
-		"payroll_payable_account", "salary_payment_account"]}
+		# The two duodécimos. Their RATE and payment month were on the settings screen
+		# while the switch that decides whether they are paid at all was not returned
+		# here and had no control — so a site could configure "Subsídio de Natal 50%,
+		# December" in full view while enable_natal sat at 0 and every December slip was
+		# refused with a message pointing at a panel that did not contain the switch.
+		"enable_ferias", "enable_natal",
+		"payroll_payable_account", "salary_payment_account",
+		# Segregation-of-duties switches. They were enforced by the backend and defaulted to
+		# ON, but were absent from here and from the Settings screen — so the department
+		# running this application single-handed could not see why an approval was refused,
+		# let alone adopt a different operating model. A control nobody can find is not a
+		# policy decision, it is an accident.
+		"require_separate_contract_approval", "require_separate_salary_change_approval",
+		"require_separate_advance_approval", "require_separate_settlement_approval",
+		"require_separate_payroll_approval", "require_separate_payment_approval",
+		# F-03: the HR / Finance boundary, by name. Defaults: self-approval OFF, both
+		# Finance rules ON — see payroll_workflow.hr_self_approval_allowed and friends.
+		"allow_hr_self_approval", "payroll_posting_requires_finance",
+		"payroll_payment_requires_finance"]}
+	# A Check that has never been written reads as None; the screen must show the
+	# effective (fail-closed) value, not an empty box that looks like OFF.
+	out["allow_hr_self_approval"] = 1 if wf.hr_self_approval_allowed() else 0
+	out["payroll_posting_requires_finance"] = 1 if wf.posting_requires_finance() else 0
+	out["payroll_payment_requires_finance"] = 1 if wf.payment_requires_finance() else 0
+	# Whether THIS user may change any of it. The screen is readable by anyone with HR
+	# access (so a Payroll Officer can see which accounts payroll posts to) but writable
+	# only by an HR Manager. Without this flag the screen rendered its editors for
+	# everybody: the Account link controls then each fired frappe.client.validate_link
+	# and were refused, sixteen 403s on one screen, and the Save button offered an action
+	# the server would reject. Sent from the permission matrix rather than decided from a
+	# role name in the browser.
+	out["_can_write"] = 1 if perms.can(perms.SETTINGS_WRITE) else 0
+
 	# Default Holiday List lives on the Company; expose it for the current company.
 	comp = _default_company(company)
 	out["_company"] = comp
@@ -2871,12 +3180,12 @@ def get_settings(company=None):
 	return out
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def save_settings(data):
 	_guard(perms.SETTINGS_WRITE)
 	from isoft_angola_hr.isoft_angola_hr.payroll import engine
 
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	comp_accts = d.pop("component_accounts", None)
 	# Default Holiday List is stored on the Company, not the single settings doctype.
 	holiday_list = d.pop("default_holiday_list", "__keep__")
@@ -2898,16 +3207,18 @@ def save_settings(data):
 		if comp:
 			frappe.db.set_value("Company", comp, "default_holiday_list", holiday_list or None)
 	frappe.db.commit()
-	return True
+	# Mapping changes are recorded by the Settings controller (Isoft Payroll Account
+	# Change) and announced when a payroll was already posted under the old mapping.
+	return {"saved": True, "mapping_changes": getattr(s, "_mapping_change_records", 0) or 0}
 
 
 # --------------------------------------------------------------------------- #
 # Employee creation
 # --------------------------------------------------------------------------- #
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_employee(data):
 	_guard(perms.EMPLOYEE_WRITE)
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	emp = frappe.new_doc("Employee")
 	emp.update({
 		"first_name": d.get("first_name"),
@@ -2933,11 +3244,11 @@ def create_employee(data):
 	return {"name": emp.name, "employee_name": emp.employee_name}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def update_employee(name, data):
 	"""Update the Angola-HR editable fields of an existing Employee from the dashboard."""
 	_guard(perms.EMPLOYEE_WRITE)
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	emp = frappe.get_doc("Employee", name)
 	for f in ("designation", "department", "custom_nif", "custom_inss_number", "custom_iban",
 	          "custom_insurance", "default_shift"):
@@ -2975,7 +3286,7 @@ def get_holiday_list(name):
 	}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def create_holiday_list(holiday_list_name, from_date, to_date, weekly_off=None):
 	_guard()
 	doc = frappe.new_doc("Holiday List")
@@ -2990,7 +3301,7 @@ def create_holiday_list(holiday_list_name, from_date, to_date, weekly_off=None):
 	return doc.name
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def add_holiday(holiday_list, holiday_date, description):
 	_guard()
 	doc = frappe.get_doc("Holiday List", holiday_list)
@@ -3030,10 +3341,10 @@ def get_shift_type(name):
 	}
 
 
-@frappe.whitelist()
+@frappe.whitelist(methods=["POST"])
 def save_shift_type(data):
 	_guard()
-	d = json.loads(data) if isinstance(data, str) else data
+	d = _json_arg(data, "data", default={})
 	if d.get("name") and frappe.db.exists("Shift Type", d["name"]):
 		doc = frappe.get_doc("Shift Type", d["name"])
 	else:

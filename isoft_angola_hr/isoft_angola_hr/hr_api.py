@@ -27,10 +27,246 @@ from isoft_angola_hr.isoft_angola_hr.services import org_analytics
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import recruitment
 from isoft_angola_hr.isoft_angola_hr.services import salary_change as salary_change_service
+from isoft_angola_hr.isoft_angola_hr.services import workflow_ui
 
 
 def _parse(value):
-	return frappe.parse_json(value) if isinstance(value, str) else value
+	"""Decode a JSON argument that arrived over HTTP.
+
+	Arguments reach a whitelisted method as strings, so this ran parse_json on caller
+	input. A malformed value raised JSONDecodeError, which Frappe renders as HTTP 500
+	with a traceback - a server error for what is really a bad request, and a stack
+	trace on the wire.
+	"""
+	if value is None or value == "":
+		return None
+	if not isinstance(value, str):
+		return value
+	try:
+		return frappe.parse_json(value)
+	except (ValueError, TypeError):
+		frappe.throw(_("The request payload was not valid JSON."),
+		             title=_("Invalid Request"))
+
+
+# --------------------------------------------------------------------------- #
+# Payroll basis (what actually drives Paid Days)
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def payroll_basis(company=None):
+	"""How Paid Days are being derived right now, in plain terms, plus the settings that
+	decide it and any that are silently falling back to a default.
+
+	HR could not previously tell whether Timesheets were affecting pay: the switch is per
+	salary slip, the divisor lives in Settings, and an unset divisor quietly became 8. All
+	three are reported here so nothing about the basis has to be inferred.
+	"""
+	perms.require(perms.PAYROLL_READ)
+	settings = frappe.get_cached_doc("Isoft HR Settings")
+	basis = settings.get("working_days_basis") or "Auto (Holiday List)"
+	daily_hours = flt(settings.get("standard_daily_hours"))
+
+	filters = {"company": company} if company else {}
+	total = frappe.db.count("Isoft Salary Slip", filters)
+	timesheet_slips = frappe.db.count(
+		"Isoft Salary Slip", dict(filters, based_on_timesheet=1))
+	attendance_slips = frappe.db.count(
+		"Isoft Salary Slip", dict(filters, validate_attendance=1, based_on_timesheet=0))
+
+	if timesheet_slips and not attendance_slips:
+		mode = _("Timesheet Based")
+	elif timesheet_slips:
+		mode = _("Mixed — some slips use Timesheets, some use Attendance")
+	elif attendance_slips:
+		mode = _("Attendance Based")
+	else:
+		mode = _("Full period — neither Attendance nor Timesheets reduce Paid Days")
+
+	warnings = []
+	if not daily_hours:
+		warnings.append(_(
+			"Standard Daily Hours is not configured. The system is using the fallback "
+			"value of 8 hours. This divisor converts Timesheet hours into Paid Days and "
+			"sets the hourly rate shown on the payslip — set it in Isoft HR Settings."))
+	if timesheet_slips and not daily_hours:
+		warnings.append(_(
+			"Timesheet-based payroll is in use while the divisor is unset, so Paid Days "
+			"are being calculated against an assumed 8-hour day."))
+
+	return {
+		"company": company,
+		"mode": mode,
+		"working_days_basis": basis,
+		"working_days_explanation": {
+			"Auto (Holiday List)": _(
+				"Total Working Days counts standard-day equivalents: each scheduled day is "
+				"worth its hours divided by the standard day, so a 4-hour Saturday counts "
+				"0.5 and a 9.5-hour day counts 1.19."),
+			"Calendar Working Days": _(
+				"Total Working Days counts DAYS from the working calendar and Holiday List: "
+				"a full scheduled weekday is 1 whatever its clock length, a short day such as "
+				"a 4-hour Saturday is 0.5, and a non-working day is 0. Shift hours do not "
+				"increase the number of payable days. Absences are deducted in days too."),
+			"Standard (Fixed)": _(
+				"Total Working Days is a fixed number from Settings, the same for every "
+				"employee and every month."),
+		}.get(basis, ""),
+		"standard_daily_hours": daily_hours,
+		"standard_daily_hours_effective": daily_hours or 8.0,
+		"standard_daily_hours_is_fallback": not daily_hours,
+		"slips_total": total,
+		"slips_timesheet_based": timesheet_slips,
+		"slips_attendance_based": attendance_slips,
+		"timesheet_formula": _(
+			"Approved Timesheet Hours ÷ Standard Daily Hours = Paid Days (capped at Total "
+			"Working Days). Timesheets affect pay ONLY on a salary slip with "
+			"\"Based on Timesheet\" ticked."),
+		"warnings": warnings,
+	}
+
+
+@frappe.whitelist()
+def salary_slip_explanation(name):
+	"""Why this slip pays what it pays, in the terms HR asks the question in.
+
+	Everything here is READ from the slip and from the same helpers payroll and the
+	payslip already use. Nothing is recalculated: if this function and the engine could
+	disagree, the screen would become a second opinion about somebody's pay.
+
+	The one derived figure is the daily value, and it is a presentation of stored numbers
+	(remuneration ÷ total working days), labelled as such — it is not what the engine
+	multiplies by, which is the proration factor.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.payroll import recibo
+
+	doc = frappe.get_doc("Isoft Salary Slip", name)
+	doc.check_permission("read")
+
+	settings = frappe.get_cached_doc("Isoft HR Settings")
+	basis = settings.get("working_days_basis") or "Auto (Holiday List)"
+	twd = flt(doc.total_working_days)
+	paid = flt(doc.payment_days)
+
+	if cint(doc.based_on_timesheet):
+		mode = _("Timesheet Based")
+		how = _("Paid Days = approved Timesheet hours ÷ Standard Daily Hours, capped at "
+		        "Total Working Days.")
+	elif cint(doc.validate_attendance):
+		mode = _("Attendance Based")
+		how = _("Paid Days = Total Working Days less each unjustified absence, counted in "
+		        "the same unit as the total.")
+	else:
+		mode = _("Full period")
+		how = _("Neither Attendance nor Timesheets reduce Paid Days on this slip, so the "
+		        "whole period is paid.")
+
+	faltas = recibo._faltas(doc)
+	overtime = recibo._overtime(doc)
+	base = recibo._component_amount(doc.get("earnings"), "SB")
+
+	# Leave that was not deducted, so HR can see it was counted as paid. The same helper
+	# feeds the "Leave Days" box on the printed receipt, so the two cannot disagree.
+	leave_days = recibo._leave_days(doc)
+
+	absent = flt(twd - paid, 4)
+	daily = flt(base / twd, 2) if base and twd else None
+
+	return {
+		"name": doc.name,
+		"employee_name": doc.employee_name,
+		"period": {"start": str(doc.start_date), "end": str(doc.end_date)},
+		"mode": mode,
+		"how": how,
+		"working_days_basis": basis,
+		"basis_note": {
+			"Calendar Working Days": _("Total Working Days counts DAYS — every scheduled "
+			                           "day is 1, whatever its length."),
+			"Auto (Holiday List)": _("Total Working Days counts standard-day equivalents "
+			                         "— a 4-hour Saturday is 0.5."),
+			"Standard (Fixed)": _("Total Working Days is a fixed number from Settings."),
+		}.get(basis, ""),
+		"total_working_days": twd,
+		"paid_days": paid,
+		"absent_days": absent if absent > 0 else 0.0,
+		"leave_days": flt(leave_days),
+		"faltas": faltas,
+		"overtime_hours": flt(overtime.get("hours")),
+		"overtime_amount": flt(overtime.get("amount")),
+		"overtime_shown": bool(overtime.get("show")),
+		"base": base,
+		"daily_value": daily,
+		"daily_value_formula": (
+			"{0} ÷ {1} = {2}".format(frappe.utils.fmt_money(base),
+			                         frappe.utils.fmt_money(twd),
+			                         frappe.utils.fmt_money(daily))
+			if daily else None),
+		"proration_factor": flt(doc.payment_factor) if doc.get("payment_factor") else (
+			flt(paid / twd, 6) if twd else None),
+		"gross_pay": flt(doc.gross_pay),
+		"total_deduction": flt(doc.total_deduction),
+		"net_pay": flt(doc.net_pay),
+		"reconciles": abs(flt(doc.gross_pay) - flt(doc.total_deduction)
+		                  - flt(doc.net_pay)) <= 0.05,
+	}
+
+
+# --------------------------------------------------------------------------- #
+# Workflow buttons (Desk forms)
+# --------------------------------------------------------------------------- #
+#: The three HR records whose lifecycle is driven by a service state machine rather than
+#: by docstatus. Their transitions were reachable only from Python, so the Desk form
+#: showed no way to approve anything and the records sat in Draft.
+_WORKFLOW_SERVICES = {
+	"Isoft Employment Contract": contract_service,
+	"Isoft Salary Change": salary_change_service,
+	"Isoft Salary Advance": advance_service,
+}
+
+#: Transitions that must carry a reason. Refusing or undoing something is a decision
+#: somebody has to account for later.
+REASON_REQUIRED = ("reject", "terminate", "cancel")
+
+
+def _workflow_service(doctype):
+	service = _WORKFLOW_SERVICES.get(doctype)
+	if not service:
+		frappe.throw(_("{0} has no HR workflow.").format(doctype))
+	return service
+
+
+@frappe.whitelist()
+def document_actions(doctype, name):
+	"""Current state of one record and the transitions THIS user may perform on it.
+
+	The form draws whatever this returns and decides nothing itself: role, state, company
+	scope and the no-self-approval rule are all applied server-side, and performing an
+	action re-checks every one of them. A button that should not exist is therefore never
+	drawn, and a button that is somehow pressed anyway is still refused.
+	"""
+	service = _workflow_service(doctype)
+	doc = frappe.get_doc(doctype, name)
+	doc.check_permission("read")
+	out = workflow_ui.summary(service, doc)
+	out.update({"doctype": doctype, "name": doc.name,
+	            "reason_required": list(REASON_REQUIRED)})
+	return out
+
+
+@frappe.whitelist()
+def perform_document_action(doctype, name, action, reason=None):
+	"""Perform one transition. Dispatches to the same service the dashboard calls, so
+	both entry points share one set of rules and one audit stamp."""
+	service = _workflow_service(doctype)
+	doc = frappe.get_doc(doctype, name)
+	# get_doc does not check permissions. Without this, a role holding the capability but
+	# no access to the DocType could act on a record it cannot even open — which is what
+	# Accounts Manager could do to a Salary Advance. document_actions() already checks.
+	doc.check_permission("read")
+	status = service.perform(doc, action, reason=reason)
+	doc.reload()
+	out = workflow_ui.summary(service, doc)
+	out.update({"doctype": doctype, "name": doc.name})
+	return out
 
 
 # --------------------------------------------------------------------------- #
@@ -69,6 +305,23 @@ def probation_decision(name, decision, notes=None, new_end=None):
 	                                                  new_end=new_end)
 
 
+def _with_actions(rows, service):
+	"""Attach the transitions the current user may perform on each listed row.
+
+	The services read their inputs with ``.get()``, and the SELECTs below already carry
+	status, company and requested_by — everything the rules need — so this costs no extra
+	queries and no document loads. The dashboard draws only what lands here; it never
+	works out for itself which buttons a row should have.
+	"""
+	for row in rows:
+		summary = workflow_ui.summary(service, row)
+		row["actions"] = summary["actions"]
+		# So a list can answer "who is this waiting for?" without opening each record.
+		row["waiting_for"] = summary["waiting_for"]
+		row["next_action"] = summary["next_action"]
+	return rows
+
+
 @frappe.whitelist()
 def list_contracts(company=None, employee=None, status=None):
 	perms.require(perms.CONTRACT_READ)
@@ -81,13 +334,14 @@ def list_contracts(company=None, employee=None, status=None):
 	if scope:
 		conditions.append(scope)
 		values.extend(scope_values)
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		"""select c.name, c.employee, c.employee_name, c.company, c.contract_type,
 			c.start_date, c.end_date, c.is_open_ended, c.status, c.probation_end,
 			c.probation_status, c.renewed_to
 		from `tabIsoft Employment Contract` c where {0}
 		order by c.start_date desc limit 300""".format(" and ".join(conditions)),
 		values, as_dict=True)
+	return _with_actions(rows, contract_service)
 
 
 @frappe.whitelist()
@@ -140,13 +394,14 @@ def list_salary_changes(company=None, employee=None, status=None):
 	if scope:
 		conditions.append(scope)
 		values.extend(scope_values)
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		"""select s.name, s.employee, s.employee_name, s.company, s.change_type,
 			s.effective_date, s.current_base, s.new_base, s.percentage_change, s.status,
 			s.requested_by, s.approved_by, s.created_profile, s.request_source, s.owner
 		from `tabIsoft Salary Change` s where {0}
 		order by s.effective_date desc limit 300""".format(" and ".join(conditions)),
 		values, as_dict=True)
+	return _with_actions(rows, salary_change_service)
 
 
 # --------------------------------------------------------------------------- #
@@ -177,7 +432,12 @@ def advance_action(name, action, reason=None):
 
 @frappe.whitelist()
 def list_advances(company=None, employee=None, open_only=0):
-	perms.require(perms.ADVANCE_REQUEST)
+	# Anyone who may ACT on an advance must be able to find one. Guarding this on
+	# advance.request alone meant Payroll Finance Approver — which holds advance.disburse
+	# and nothing else — could disburse an advance through the API but could not list it,
+	# so the screen it was supposed to work from came up empty.
+	if not perms.any_of([perms.ADVANCE_REQUEST, perms.ADVANCE_APPROVE, perms.ADVANCE_DISBURSE]):
+		perms.require(perms.ADVANCE_REQUEST)
 	if cint(open_only):
 		return advance_service.open_advances(company=company)
 	conditions, values = ["1=1"], []
@@ -189,13 +449,14 @@ def list_advances(company=None, employee=None, open_only=0):
 	if scope:
 		conditions.append(scope)
 		values.extend(scope_values)
-	return frappe.db.sql(
+	rows = frappe.db.sql(
 		"""select a.name, a.employee, a.employee_name, a.company, a.request_date,
 			a.requested_amount, a.approved_amount, a.recovered_amount, a.outstanding_amount,
 			a.installments, a.status, a.request_source, a.requested_by, a.owner
 		from `tabIsoft Salary Advance` a where {0}
 		order by a.request_date desc limit 300""".format(" and ".join(conditions)),
 		values, as_dict=True)
+	return _with_actions(rows, advance_service)
 
 
 # --------------------------------------------------------------------------- #
@@ -513,6 +774,10 @@ def self_service_context():
 # --------------------------------------------------------------------------- #
 @frappe.whitelist()
 def contract_template_variables(include_salary=0):
+	# Called only from the HR desk, to fill the template help panel. It was reachable by
+	# any logged-in account with no HR role at all: harmless in content — the names of
+	# placeholders — but an open door on the contract module for no reason.
+	perms.require(perms.CONTRACT_WRITE)
 	return contract_documents.available_variables(include_salary=cint(include_salary))
 
 
@@ -741,7 +1006,13 @@ def mark_notifications_read(names=None):
 
 @frappe.whitelist()
 def labour_law_reference():
-	"""The statutory limits this app checks against, with their articles and sources."""
+	"""The statutory limits this app checks against, with their articles and sources.
+
+	Deliberately open to any authenticated user. It returns published Angolan law —
+	article numbers and statutory limits — and no configuration, no company data and
+	nothing about any person. Guarding it would only stop an employee reading the law
+	their own payslip is calculated under.
+	"""
 	from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law
 
 	return angola_labour_law.reference()
@@ -967,6 +1238,11 @@ def next_payroll_boundary(after=None):
 	from frappe.utils import add_months, getdate, nowdate
 
 	from isoft_angola_hr.isoft_angola_hr import api
+
+	# The cycle start day is site configuration, and this endpoint answered it to any
+	# logged-in account. It is called only from the salary-change dialog on the HR desk,
+	# so it is authorised as the action it serves.
+	perms.require(perms.SALARY_CHANGE_REQUEST)
 
 	base = getdate(after) if after else getdate(nowdate())
 	start, end = api._cycle_period(base)

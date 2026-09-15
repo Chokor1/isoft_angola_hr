@@ -79,12 +79,16 @@ class IsoftAttendanceOccurrence(Document):
 		return min(1.0, flt(self.hours) / nh)
 
 
-def occurrence_missing_by_date(employee, start_date, end_date):
+def occurrence_missing_by_date(employee, start_date, end_date, basis=None):
 	"""For a period, return two dicts keyed by date:
 	  covered[date] = True if any occurrence exists that day (occurrence is authoritative),
-	  deduct[date]  = summed missing-days of the UNJUSTIFIED occurrences that day (max 1)."""
+	  deduct[date]  = summed missing-days of the UNJUSTIFIED occurrences that day (max 1).
+
+	``basis`` is the Working Days Basis the caller is totalling in. It has to be passed
+	through: these deductions are subtracted from that total, so they must be measured
+	in the same unit (see day_value)."""
 	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
-		employee_shift, shift_day_hours, shift_day_weight,
+		day_value, employee_shift, shift_day_hours,
 	)
 
 	std = flt(frappe.db.get_single_value("Isoft HR Settings", "standard_daily_hours")) or 8
@@ -99,7 +103,7 @@ def occurrence_missing_by_date(employee, start_date, end_date):
 		d = getdate(r.occurrence_date)
 		covered[d] = True
 		if r.status == "Unjustified":
-			w = shift_day_weight(shift, d, std)  # value of a full day on this date
+			w = day_value(shift, d, std, basis)  # value of a full day on this date
 			if r.occurrence_type == "Full Day":
 				m = w
 			elif r.occurrence_type == "Half Day":
@@ -181,7 +185,19 @@ def check_unjustified_month_alerts():
 
 def _notify_hr(subject, employee, dedup_since):
 	"""Send a one-off Alert notification to every enabled HR Manager, deduplicated by
-	subject since `dedup_since`."""
+	subject since `dedup_since`.
+
+	This is the one notification writer in the application that does not go through
+	``hr_notifications``: it predates that service and inserts its own Notification Log.
+	It therefore has to ask the policy itself — silencing ``hr_notifications`` alone would
+	have left attendance alerts arriving, which is exactly the half-disabled state the
+	audit was meant to prevent.
+	"""
+	from isoft_angola_hr.isoft_angola_hr.services import notification_policy as policy
+
+	if policy.suppressed():
+		return
+
 	if frappe.db.exists("Notification Log", {"subject": subject, "creation": [">=", dedup_since]}):
 		return
 	hr_users = set(frappe.get_all("Has Role", filters={"role": "HR Manager", "parenttype": "User"}, pluck="parent"))

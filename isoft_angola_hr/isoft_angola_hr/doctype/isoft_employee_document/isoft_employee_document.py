@@ -76,11 +76,22 @@ class IsoftEmployeeDocument(Document):
 		file_doc.save(ignore_permissions=True)
 		self.attachment = file_doc.file_url
 
-	def has_permission(self, ptype="read", user=None):
-		"""Confidential and medical documents are HR Manager only."""
-		if not cint(self.confidential):
-			return True
-		return perms.can(perms.DOCUMENT_CONFIDENTIAL, user=user)
+	# NOTE: this class deliberately does NOT define has_permission().
+	#
+	# It used to, in order to keep confidential documents with HR. Defining it here
+	# OVERRIDES Document.has_permission, which is what Document.check_permission() and
+	# save() call — so the entire Frappe permission stack (roles, DocPerms and the
+	# registered has_permission hook) was skipped for this DocType, and the method
+	# returned True for every non-confidential document. The result was that
+	# /api/resource/Isoft Employee Document/<name> served an employee's identity
+	# document, and accepted writes to it, for ANY caller including an unauthenticated
+	# Guest — while the list view stayed correctly protected, which is why it was easy
+	# to miss.
+	#
+	# The confidentiality rule now lives in the registered hook
+	# (doc_permissions.employee_document_permission), where Frappe applies it ON TOP of
+	# the role check instead of in place of it. A controller may narrow access; it must
+	# never be the thing that grants it.
 
 
 def expiry_thresholds():

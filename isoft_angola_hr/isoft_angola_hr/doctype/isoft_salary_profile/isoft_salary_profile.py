@@ -183,6 +183,9 @@ class IsoftSalaryProfile(Document):
 			"doctype": "Isoft Salary History",
 			"employee": self.employee,
 			"salary_profile": self.name,
+			# The date the salary takes effect, as distinct from change_date below, which
+			# is merely when somebody pressed Save. HR reads the history by effective date.
+			"from_date": self.from_date,
 			"change_date": now(),
 			"changed_by": frappe.session.user,
 			"change_type": "Created" if before is None else "Updated",

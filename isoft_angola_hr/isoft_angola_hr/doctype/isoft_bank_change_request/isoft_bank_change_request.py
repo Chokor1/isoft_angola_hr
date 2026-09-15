@@ -77,7 +77,7 @@ class IsoftBankChangeRequest(Document):
 			# HR changing their own bank details still needs a second pair of eyes.
 			if frappe.db.get_value("Employee", self.employee, "user_id") == frappe.session.user:
 				frappe.throw(
-					_("Não pode aprovar a alteração dos seus próprios dados bancários."),
+					_("You cannot approve a change to your own bank details."),
 					title=_("Self-Approval Blocked"))
 		frappe.db.set_value("Employee", self.employee, "custom_iban", self.new_iban)
 		self.db_set("status", APPROVED, update_modified=False)

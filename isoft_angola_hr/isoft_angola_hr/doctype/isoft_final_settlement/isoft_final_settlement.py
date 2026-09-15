@@ -79,6 +79,11 @@ class IsoftFinalSettlement(Document):
 			"natal_rate": flt(self.natal_rate),
 			"supplement_months_override": self.supplement_months_override or None,
 			"seniority_years_override": self.seniority_years_override or None,
+			# Gathered here, not inside compute(): compute() is a pure function of its
+			# inputs, and this reads Attendance and the payroll history.
+			"overtime": settlement.collect_unpaid_overtime(
+				self.employee, self.company, flt(self.base),
+				self.salary_period_start, self.termination_date),
 			"agreed_compensation": flt(self.agreed_compensation),
 			"compensation_tax_position": self.compensation_tax_position,
 			"notice_required_days": cint(self.notice_required_days),

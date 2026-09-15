@@ -36,7 +36,17 @@ app_include_js = "/assets/isoft_angola_hr/js/angola_hr_icon.js"
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+# Approval buttons for the three records whose lifecycle is a service state machine.
+# Without this the transitions are reachable only from Python and the Desk form offers
+# no way to submit or approve, which is why they sat in Draft.
+_WORKFLOW_JS = "public/js/isoft_workflow.js"
+doctype_js = {
+	"Isoft Employment Contract": _WORKFLOW_JS,
+	"Isoft Salary Change": _WORKFLOW_JS,
+	"Isoft Salary Advance": _WORKFLOW_JS,
+	# Not a workflow doctype — the same file also carries the Salary Slip explanation panel.
+	"Isoft Salary Slip": _WORKFLOW_JS,
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -100,6 +110,16 @@ has_permission = {
 	"Isoft Bank Change Request": _DOC_PERMS + "own_record_permission",
 }
 
+# Jinja
+# -----
+# Exposed to print formats. The payslip receipt needs several lookups (company address,
+# absence counters, approved overtime) that do not belong inline in a template.
+jenv = {
+	"methods": [
+		"isoft_recibo_context:isoft_angola_hr.isoft_angola_hr.payroll.recibo.get_context",
+	]
+}
+
 # DocType Class
 # ---------------
 # Override standard doctype classes
@@ -118,8 +138,6 @@ override_doctype_class = {
 # ---------------
 # Hook on document methods and events
 
-_NOTIFY = "isoft_angola_hr.isoft_angola_hr.services.hr_notifications."
-
 doc_events = {
 	# Cancelling a payroll Journal Entry must release the salary slips that point at it,
 	# otherwise the submitted slip's Link blocks the cancellation and the correction
@@ -127,16 +145,16 @@ doc_events = {
 	"Journal Entry": {
 		"on_cancel": "isoft_angola_hr.isoft_angola_hr.api.unlink_cancelled_payroll_entry",
 	},
-	# Phase 4 notifications. Each handler swallows its own failures — a notification that
-	# cannot be delivered must never roll back the payroll, leave or advance that caused
-	# it. None of them contains an amount; they say what happened and link back.
-	"Isoft Salary Slip": {"on_submit": _NOTIFY + "notify_payslip_available"},
-	"Leave Application": {
-		"after_insert": _NOTIFY + "notify_leave_requested",
-		"on_submit": _NOTIFY + "notify_leave_decision",
-	},
-	"Isoft Bank Change Request": {"on_update": _NOTIFY + "notify_bank_change_decision"},
-	"Isoft Salary Advance": {"on_update": _NOTIFY + "notify_advance_status"},
+	# NOTIFICATIONS REMOVED. Five handlers used to hang here — payslip available, leave
+	# requested, leave decided, bank change decided, advance status — each firing on a
+	# document event and writing to the bell menu.
+	#
+	# They are unregistered rather than left in place to no-op, because a hook that runs
+	# on every salary slip submission to do nothing is a cost with no purpose, and it
+	# reads to the next person as though notifications were still expected. The handler
+	# functions survive in services/hr_notifications.py, guarded by the policy, so
+	# restoring them is a hooks entry and a constant rather than an archaeology exercise.
+	# See services/notification_policy.py.
 }
 
 # Scheduled Tasks
@@ -160,17 +178,22 @@ doc_events = {
 #	]
 # }
 
+# Every job here changes derived STATE. The three that only produced notifications —
+# check_recurrence_alerts, check_unjustified_month_alerts and run_daily_alerts — were
+# removed with the rest of the notification system; see services/notification_policy.py.
+# None of the four that remain notifies anybody, and none of them approves, renews or
+# pays anything.
 scheduler_events = {
 	"daily": [
+		# Marks an occurrence Unjustified once its justification window has closed.
 		"isoft_angola_hr.isoft_angola_hr.doctype.isoft_attendance_occurrence.isoft_attendance_occurrence.auto_flag_unjustified",
-		"isoft_angola_hr.isoft_angola_hr.doctype.isoft_attendance_occurrence.isoft_attendance_occurrence.check_recurrence_alerts",
-		"isoft_angola_hr.isoft_angola_hr.doctype.isoft_attendance_occurrence.isoft_attendance_occurrence.check_unjustified_month_alerts",
-		# Phase 3 — HR lifecycle upkeep. All three only ever move a record between derived
-		# states or notify somebody; none of them approves, renews or pays anything.
+		# Moves contracts to Expiring / Expired as their end dates pass.
 		"isoft_angola_hr.isoft_angola_hr.services.contracts.refresh_contract_statuses",
+		# Same, for employee documents.
 		"isoft_angola_hr.isoft_angola_hr.doctype.isoft_employee_document.isoft_employee_document.refresh_document_statuses",
+		# Applies an approved salary change on the day it takes effect. Business logic,
+		# not a reminder — without it approved raises never reach the Salary Profile.
 		"isoft_angola_hr.isoft_angola_hr.services.salary_change.apply_due_changes",
-		"isoft_angola_hr.isoft_angola_hr.services.hr_notifications.run_daily_alerts",
 	],
 }
 

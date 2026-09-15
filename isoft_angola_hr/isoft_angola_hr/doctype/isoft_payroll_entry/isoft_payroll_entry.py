@@ -23,6 +23,11 @@ from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 
 class IsoftPayrollEntry(Document):
 	def validate(self):
+		# First, before defaults are filled in: the state, the audit stamps and the
+		# approval snapshot may only change through payroll_workflow.perform(). Every
+		# other save — Desk, REST, frappe.client.* — is refused here, Administrator
+		# included. See payroll_workflow.assert_lifecycle_untouched.
+		wf.assert_lifecycle_untouched(self)
 		self.set_defaults()
 		self.validate_period()
 		self.validate_no_duplicate_run()
@@ -169,10 +174,12 @@ class IsoftPayrollEntry(Document):
 		state = wf.state_of(self)
 		if state not in (wf.APPROVED, wf.POSTED, wf.PAYMENT_READY):
 			frappe.throw(
-				_("O processamento salarial ainda não foi aprovado. Salary slips may only be "
-				  "submitted after approval — current state: {0}.").format(_(state)),
+				_("The payroll has not been approved yet. Salary slips may only be submitted "
+				  "after approval — current state: {0}.").format(_(state)),
 				title=_("Not Approved"))
 		perms.require(perms.PAYROLL_POST)
+		# Submitting the slips is the first act of posting: Finance, never the preparer.
+		wf.check_actor(self, wf.POST)
 
 		submitted = 0
 		with wf.unlocked():
@@ -181,6 +188,12 @@ class IsoftPayrollEntry(Document):
 					continue
 				slip = frappe.get_doc("Isoft Salary Slip", row.salary_slip)
 				if slip.docstatus == 0:
+					# Submitted by the application on behalf of an action the capability
+					# layer has already authorised (payroll.post, the Finance rule, the
+					# preparer rule, the approved state). Requiring the raw DocType
+					# `submit` right on top would force every Finance user to hold HR-side
+					# document permissions — the same reasoning as the Journal Entries.
+					slip.flags.ignore_permissions = True
 					slip.submit()
 					submitted += 1
 			self.salary_slips_submitted = 1
@@ -238,6 +251,10 @@ class IsoftPayrollEntry(Document):
 				"exported_by", "exported_at", "export_count")},
 			"allowed_actions": wf.allowed_actions(self),
 			"next_step": wf.next_step(self),
+			# Finance buttons (post, submit slips, pay, bank file) are rendered from these,
+			# not from the state alone, so an HR user never sees an action the server
+			# would refuse. Every endpoint re-checks.
+			"finance": wf.finance_flags(self),
 		}
 
 	def previous_entry_totals(self):

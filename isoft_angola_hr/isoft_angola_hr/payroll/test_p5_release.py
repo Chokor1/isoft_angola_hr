@@ -479,7 +479,7 @@ class TestPerformance(ReleaseFixture):
 		with self.assertRaises(frappe.ValidationError) as cm:
 			performance.recommend_salary_change(
 				appraisal, 500000, add_days(self.next_period_start(), 5))
-		self.assertIn("período", str(cm.exception))
+		self.assertIn("payroll processing period", str(cm.exception))
 
 	def test_salary_recommendation_requires_a_finalised_review(self):
 		cycle, appraisal = self.cycle_with_appraisal()

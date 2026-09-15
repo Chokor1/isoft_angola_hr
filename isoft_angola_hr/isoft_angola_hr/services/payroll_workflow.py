@@ -35,7 +35,7 @@ import json
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, now
+from frappe.utils import cint, flt, get_datetime, now
 
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 
@@ -82,56 +82,56 @@ _TRANSITIONS = {
 		"to": CALCULATED,
 		"permission": perms.PAYROLL_CALCULATE,
 		"stamp": ("prepared_by", "prepared_at"),
-		"label": _("Calculate Payroll"),
+		"label": "Calculate Payroll",
 	},
 	SUBMIT_FOR_APPROVAL: {
 		"from": (CALCULATED,),
 		"to": PENDING_APPROVAL,
 		"permission": perms.PAYROLL_SUBMIT_FOR_APPROVAL,
 		"stamp": ("submitted_by", "submitted_at"),
-		"label": _("Submit for Approval"),
+		"label": "Submit for Approval",
 	},
 	APPROVE: {
 		"from": (PENDING_APPROVAL,),
 		"to": APPROVED,
 		"permission": perms.PAYROLL_APPROVE,
 		"stamp": ("approved_by", "approved_at"),
-		"label": _("Approve Payroll"),
+		"label": "Approve Payroll",
 	},
 	REJECT: {
 		"from": (PENDING_APPROVAL,),
 		"to": REJECTED,
 		"permission": perms.PAYROLL_REJECT,
 		"stamp": ("rejected_by", "rejected_at"),
-		"label": _("Reject Payroll"),
+		"label": "Reject Payroll",
 	},
 	POST: {
 		"from": (APPROVED,),
 		"to": POSTED,
 		"permission": perms.PAYROLL_POST,
 		"stamp": ("posted_by", "posted_at"),
-		"label": _("Post Accounting"),
+		"label": "Post Accounting",
 	},
 	RELEASE_FOR_PAYMENT: {
 		"from": (POSTED,),
 		"to": PAYMENT_READY,
 		"permission": perms.PAYROLL_CONFIRM_PAYMENT,
 		"stamp": ("payment_authorized_by", "payment_authorized_at"),
-		"label": _("Release for Payment"),
+		"label": "Release for Payment",
 	},
 	PAY: {
 		"from": (PAYMENT_READY,),
 		"to": PAID,
 		"permission": perms.PAYROLL_CONFIRM_PAYMENT,
 		"stamp": (None, "paid_at"),
-		"label": _("Confirm Payment"),
+		"label": "Confirm Payment",
 	},
 	CLOSE: {
 		"from": (PAID,),
 		"to": CLOSED,
 		"permission": perms.PAYROLL_CLOSE,
 		"stamp": ("closed_by", "closed_at"),
-		"label": _("Close Payroll"),
+		"label": "Close Payroll",
 	},
 	CANCEL: {
 		# Cancellable from EVERY live state, including Payment Ready, Paid and Closed.
@@ -146,13 +146,155 @@ _TRANSITIONS = {
 		"to": CANCELLED,
 		"permission": perms.PAYROLL_CANCEL,
 		"stamp": ("cancelled_by", "cancelled_at"),
-		"label": _("Cancel Payroll"),
+		"label": "Cancel Payroll",
 	},
 }
 
 
 def transition_labels():
-	return {a: spec["label"] for a, spec in _TRANSITIONS.items()}
+	# Translated on read: a _() in the table freezes at import time.
+	return {a: _(spec["label"]) for a, spec in _TRANSITIONS.items()}
+
+
+# --------------------------------------------------------------------------- #
+# Lifecycle fields — written by perform() and nothing else
+# --------------------------------------------------------------------------- #
+#: The state, every audit stamp and the approval snapshot. Frappe marks them read-only in
+#: the form, but a read-only field is a presentation hint: ``frappe.client.set_value``,
+#: a REST ``PUT`` and ``frappe.client.save`` all accepted them from anybody holding
+#: *write* on the DocType. One such call marked a payroll Paid — or Approved, with a
+#: forged approver — with no approval and no ledger entry behind it. These fields now
+#: change only inside :class:`transition`, which only :func:`perform` and
+#: :func:`refresh_payment_state` open.
+LIFECYCLE_FIELDS = (
+	"status",
+	"prepared_by", "prepared_at",
+	"submitted_by", "submitted_at",
+	"approved_by", "approved_at",
+	"rejected_by", "rejected_at",
+	"posted_by", "posted_at",
+	"payment_authorized_by", "payment_authorized_at",
+	"paid_at",
+	"closed_by", "closed_at",
+	"cancelled_by", "cancelled_at",
+	"approval_fingerprint",
+	"approved_employees", "approved_gross", "approved_employee_inss", "approved_employer_inss",
+	"approved_irt", "approved_net", "approved_employer_cost",
+)
+
+_NUMERIC_LIFECYCLE = frozenset({
+	"approved_employees", "approved_gross", "approved_employee_inss", "approved_employer_inss",
+	"approved_irt", "approved_net", "approved_employer_cost",
+})
+_DATETIME_LIFECYCLE = frozenset({f for f in LIFECYCLE_FIELDS if f.endswith("_at")})
+
+_TRANSITION_FLAG = "isoft_payroll_transition"
+
+
+class transition(object):
+	"""Context manager under which a Payroll Entry may be saved with changed lifecycle
+	fields. Opened by :func:`perform` and :func:`refresh_payment_state` only — never by an
+	endpoint, never by the dashboard. It is a request flag, so it is unreachable over HTTP:
+	the only way to set it is to run this module's own code."""
+
+	def __enter__(self):
+		self._previous = frappe.flags.get(_TRANSITION_FLAG)
+		frappe.flags[_TRANSITION_FLAG] = True
+		return self
+
+	def __exit__(self, *exc):
+		frappe.flags[_TRANSITION_FLAG] = self._previous
+		return False
+
+
+def in_transition():
+	return bool(frappe.flags.get(_TRANSITION_FLAG))
+
+
+def _lifecycle_value(field, value):
+	"""Normalise for comparison: the incoming document may carry strings (REST), the stored
+	one carries typed values, and Frappe casts only after ``validate`` has run."""
+	if value in (None, ""):
+		return None
+	if field in _NUMERIC_LIFECYCLE:
+		return flt(value, 2)
+	if field in _DATETIME_LIFECYCLE:
+		try:
+			return str(get_datetime(value))
+		except Exception:
+			return str(value)
+	return str(value)
+
+
+def assert_lifecycle_untouched(doc):
+	"""Refuse a save that changes a lifecycle field outside :func:`perform`.
+
+	Called first thing in ``IsoftPayrollEntry.validate``, so it covers every channel that
+	ends in ``Document.save``: the Desk form, ``frappe.client.set_value`` /
+	``frappe.client.save`` / ``frappe.client.insert``, the REST resource API, and any
+	Python that saves the document by hand. It is a channel guard, not a role guard —
+	**Administrator is not exempt**: the only sanctioned writer is the workflow, whatever
+	the user's roles. (Tests that need a state without walking the workflow write it with
+	``frappe.db.set_value``, which is SQL and does not pass through ``validate``.)
+
+	A brand-new entry may say Draft and name its creator as preparer (``set_defaults``
+	does exactly that); it may not be born approved, posted or paid.
+	"""
+	if in_transition():
+		return
+
+	if doc.is_new():
+		offending = []
+		for field in LIFECYCLE_FIELDS:
+			value = _lifecycle_value(field, doc.get(field))
+			if value is None:
+				continue
+			if field == "status" and value == DRAFT:
+				continue
+			if field == "prepared_by" and value in (frappe.session.user, doc.get("owner")):
+				continue
+			offending.append(field)
+	else:
+		before = doc.get_doc_before_save()
+		if before is None:
+			# No stored copy to compare with (e.g. a stale document object): re-read.
+			before = frappe.get_doc(doc.doctype, doc.name)
+		offending = [
+			field for field in LIFECYCLE_FIELDS
+			if _lifecycle_value(field, doc.get(field)) != _lifecycle_value(field, before.get(field))
+		]
+
+	if offending:
+		frappe.throw(
+			_("The payroll lifecycle cannot be edited directly ({0}). Use the payroll "
+			  "workflow actions — calculate, submit for approval, approve, post, release, "
+			  "pay, close or cancel — which record who did what and when.").format(
+				", ".join(offending)),
+			frappe.PermissionError,
+			title=_("Payroll Lifecycle Protected"),
+		)
+
+
+def assert_slip_in_run(entry_name, slip_name):
+	"""A salary slip counts only if the payroll run lists it.
+
+	The approval snapshot, the posting loop and the bank file all read the run's
+	``employees`` table. A slip that merely *points at* an approved run — a Link field
+	anybody with write access could set — was never approved by anyone, so it may not be
+	submitted, posted or paid.
+	"""
+	if not entry_name or not slip_name:
+		frappe.throw(
+			_("Salary slip {0} does not belong to a payroll run.").format(slip_name or "?"),
+			frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+	listed = frappe.db.exists("Isoft Payroll Employee", {
+		"parenttype": "Isoft Payroll Entry", "parent": entry_name, "salary_slip": slip_name})
+	if not listed:
+		frappe.throw(
+			_("Salary slip {0} is not listed in payroll {1}. Only slips generated by the run "
+			  "are covered by its approval.").format(frappe.bold(slip_name), frappe.bold(entry_name)),
+			frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+	return True
 
 
 # --------------------------------------------------------------------------- #
@@ -161,22 +303,55 @@ def transition_labels():
 def _flag(fieldname, default=1):
 	"""Read a control checkbox, treating "never configured" as the SAFE default.
 
-	A Check field added by a migration has no stored value on an existing Singles record,
-	and an unset value must not read as "segregation disabled" — that would silently
-	switch the control off on precisely the sites that upgrade into it.
+	The guard used to be written here against ``get_single_value``, which casts a Check
+	to 0 — so "never configured" and "switched off" were the same value and the safe
+	default never applied. :func:`separation_required` reads the stored row instead.
 	"""
-	value = frappe.db.get_single_value("Isoft HR Settings", fieldname)
-	if value is None or value == "":
-		return cint(default)
-	return cint(value)
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import separation_required
+	return separation_required(fieldname, default)
+
+
+def hr_self_approval_allowed():
+	"""The visible "Allow HR self-approval" switch (default OFF)."""
+	return bool(_flag("allow_hr_self_approval", 0))
 
 
 def requires_separate_approval():
+	"""The submitter may not approve — unless HR self-approval has been switched on.
+
+	Two switches, one rule: ``require_separate_payroll_approval`` is the original
+	control (an explicit 0 relaxes it, see test_p39) and ``allow_hr_self_approval`` is
+	the switch the operating model asks for by name. Either relaxation permits
+	self-approval; the safe default of both requires a second person.
+	"""
+	if hr_self_approval_allowed():
+		return False
 	return _flag("require_separate_payroll_approval", 1)
 
 
 def requires_separate_payment_approval():
 	return _flag("require_separate_payment_approval", 1)
+
+
+def posting_requires_finance():
+	"""Posting is Finance work: the preparer may not post, and Accounts Manager held by
+	HR staff does not count (permissions.is_payroll_finance). Default ON."""
+	return bool(_flag("payroll_posting_requires_finance", 1))
+
+
+def payment_requires_finance():
+	"""Releasing, generating the bank file and confirming payment are Finance work.
+	Default ON."""
+	return bool(_flag("payroll_payment_requires_finance", 1))
+
+
+#: Pseudo-action for the bank file: not a state transition, but a Finance action whose
+#: actor rules are those of payment.
+EXPORT_BANK = "export_bank"
+
+#: Who prepared this payroll. ``prepared_by`` is stamped on creation (set_defaults) and
+#: again by every calculation; ``submitted_by`` by the submission for approval.
+_PREPARER_FIELDS = ("prepared_by", "submitted_by")
 
 
 # --------------------------------------------------------------------------- #
@@ -187,6 +362,28 @@ def state_of(entry):
 	read as Draft (nothing was ever approved) so no historical record silently gains an
 	approval it never had."""
 	return entry.get("status") or DRAFT
+
+
+class quiet(object):
+	"""Discard the messages queued by a check whose refusal is caught, not shown.
+
+	``frappe.throw`` queues its message for the client *before* raising. The screen
+	helpers below ask "may this user do X?" by calling the same guards the endpoints use
+	and catching the refusal — and every caught refusal still reached the browser as a
+	pop-up ("You are not authorised to perform this operation (payroll.export_bank)")
+	while an HR user was merely opening a run. Rendering a button is not an attempt to
+	press it; the queued message is dropped. The rules themselves are untouched.
+	"""
+
+	def __enter__(self):
+		self._n = len(frappe.message_log or [])
+		return self
+
+	def __exit__(self, *exc):
+		log = frappe.message_log
+		if log is not None and len(log) > self._n:
+			del log[self._n:]
+		return False
 
 
 def allowed_actions(entry, user=None):
@@ -201,10 +398,11 @@ def allowed_actions(entry, user=None):
 			continue
 		if not perms.can_company(entry.get("company"), user=user):
 			continue
-		try:
-			_check_actor(entry, action, user=user)
-		except frappe.ValidationError:
-			continue
+		with quiet():
+			try:
+				_check_actor(entry, action, user=user)
+			except frappe.ValidationError:
+				continue
 		out.append(action)
 	return out
 
@@ -212,21 +410,21 @@ def allowed_actions(entry, user=None):
 #: What has to happen next, and who has to do it. Users should never have to translate a
 #: status code into an action — the document should say what it is waiting for.
 _NEXT_STEP = {
-	DRAFT: ("calculate", _("Payroll Officer"), _("Calculate the payroll to generate the salary slips.")),
-	CALCULATED: ("submit_for_approval", _("Payroll Officer"),
-	             _("Review the calculation and submit it for approval.")),
-	PENDING_APPROVAL: ("approve", _("Payroll Manager"),
-	                   _("Review the totals and approve or reject the payroll.")),
-	REJECTED: ("calculate", _("Payroll Officer"),
-	           _("Correct what the approver reported and recalculate.")),
-	APPROVED: ("post", _("Finance"), _("Submit the salary slips and post the accounting.")),
-	POSTED: ("release_for_payment", _("Finance"),
-	         _("Check the bank details and release the payroll for payment.")),
-	PAYMENT_READY: ("pay", _("Finance"),
-	                _("Generate the bank file and post the salary payments.")),
-	PAID: ("close", _("Finance"), _("Reconcile and close the payroll period.")),
-	CLOSED: (None, None, _("This payroll is closed. Corrections require cancellation.")),
-	CANCELLED: (None, None, _("This payroll was cancelled.")),
+	DRAFT: ("calculate", "Payroll Officer", "Calculate the payroll to generate the salary slips."),
+	CALCULATED: ("submit_for_approval", "Payroll Officer",
+	             "Review the calculation and submit it for approval."),
+	PENDING_APPROVAL: ("approve", "Payroll Manager",
+	                   "Review the totals and approve or reject the payroll."),
+	REJECTED: ("calculate", "Payroll Officer",
+	           "Correct what the approver reported and recalculate."),
+	APPROVED: ("post", "Finance", "Submit the salary slips and post the accounting."),
+	POSTED: ("release_for_payment", "Finance",
+	         "Check the bank details and release the payroll for payment."),
+	PAYMENT_READY: ("pay", "Finance",
+	                "Generate the bank file and post the salary payments."),
+	PAID: ("close", "Finance", "Reconcile and close the payroll period."),
+	CLOSED: (None, None, "This payroll is closed. Corrections require cancellation."),
+	CANCELLED: (None, None, "This payroll was cancelled."),
 }
 
 
@@ -234,17 +432,22 @@ def next_step(entry):
 	"""The state, the next action, who must take it, and what currently blocks it."""
 	state = state_of(entry)
 	action, who, description = _NEXT_STEP.get(state, (None, None, None))
+	# Translated HERE: _NEXT_STEP is a module-level constant, so a _() inside it
+	# would resolve once at import and freeze the guidance in the boot language.
+	who = _(who) if who else who
+	description = _(description) if description else description
 	blockers = []
 	if action:
-		try:
-			assert_transition(entry, action)
-		except (frappe.ValidationError, frappe.PermissionError) as exc:
-			blockers.append(frappe.utils.strip_html(str(exc)))
+		with quiet():
+			try:
+				assert_transition(entry, action)
+			except (frappe.ValidationError, frappe.PermissionError) as exc:
+				blockers.append(frappe.utils.strip_html(str(exc)))
 	return {
 		"state": state,
 		"state_label": _(state),
 		"next_action": action,
-		"next_action_label": _TRANSITIONS[action]["label"] if action else None,
+		"next_action_label": _(_TRANSITIONS[action]["label"]) if action else None,
 		"responsible": who,
 		"description": description,
 		"blockers": blockers,
@@ -252,28 +455,61 @@ def next_step(entry):
 	}
 
 
+def preparers_of(entry):
+	"""Every identity that prepared this payroll: creator, calculator, submitter."""
+	return {entry.get(f) for f in _PREPARER_FIELDS if entry.get(f)}
+
+
 def _check_actor(entry, action, user=None):
 	"""Segregation of duties. Roles alone are not enough — one person can hold several,
-	so the identity that prepared the payroll is compared with the identity approving it."""
+	so the identities that prepared and approved the payroll are compared with the
+	identity acting now. Administrator is not exempt from any of these: if
+	Administrator prepared the run, Administrator may not approve, post or pay it."""
 	user = user or frappe.session.user
 
 	if action == APPROVE and requires_separate_approval():
 		preparer = entry.get("submitted_by") or entry.get("prepared_by")
 		if preparer and preparer == user:
 			frappe.throw(
-				_("Não pode aprovar um processamento salarial preparado por si próprio. "
-				  "(Payroll submitted by {0} must be approved by a different user.)").format(preparer),
+				_("You cannot approve a payroll you prepared. Payroll submitted by {0} must "
+				  "be approved by a different user.").format(preparer),
 				title=_("Self-Approval Blocked"),
 			)
 
-	if action in (RELEASE_FOR_PAYMENT, PAY) and requires_separate_payment_approval():
-		approver = entry.get("approved_by")
-		if approver and approver == user:
+	# The preparer never posts their own payroll (F-03). Holding Accounts Manager as
+	# well changes nothing: this compares identities, not roles.
+	if action == POST and posting_requires_finance() and user in preparers_of(entry):
+		frappe.throw(
+			_("You cannot post a payroll you prepared. Payroll {0} was prepared by {1}; "
+			  "posting it to the ledger is a Finance action for a different user.").format(
+				entry.get("name"), ", ".join(sorted(preparers_of(entry)))),
+			title=_("Posting Segregation"),
+		)
+
+	if action in (RELEASE_FOR_PAYMENT, PAY, EXPORT_BANK):
+		if requires_separate_payment_approval():
+			approver = entry.get("approved_by")
+			if approver and approver == user:
+				frappe.throw(
+					_("You cannot authorise payment of a payroll you approved. Payroll approved "
+					  "by {0} must be paid by a different user.").format(approver),
+					title=_("Payment Segregation"),
+				)
+		if payment_requires_finance() and user in preparers_of(entry):
 			frappe.throw(
-				_("Não pode autorizar o pagamento de um processamento que aprovou. "
-				  "(Payroll approved by {0} must be paid by a different user.)").format(approver),
+				_("You cannot release, export or pay a payroll you prepared. Payroll {0} was "
+				  "prepared by {1}; payment is a Finance action for a different user.").format(
+					entry.get("name"), ", ".join(sorted(preparers_of(entry)))),
 				title=_("Payment Segregation"),
 			)
+
+
+def check_actor(entry, action, user=None):
+	"""Public form of the identity rules, for the endpoints that act on a payroll
+	without changing its state (posting one slip, generating the bank file, recording
+	the bank's answer)."""
+	_check_actor(entry, action, user=user)
+	return True
 
 
 def assert_transition(entry, action, user=None):
@@ -291,7 +527,7 @@ def assert_transition(entry, action, user=None):
 	if state not in spec["from"]:
 		frappe.throw(
 			_("Cannot {0} a payroll that is {1}. Allowed only when the payroll is: {2}.").format(
-				spec["label"], _(state), ", ".join(_(s) for s in spec["from"])),
+				_(spec["label"]), _(state), ", ".join(_(s) for s in spec["from"])),
 			title=_("Invalid Payroll State"),
 		)
 	_check_actor(entry, action, user=user)
@@ -327,7 +563,8 @@ def perform(entry, action, user=None, reason=None, save=True):
 
 	if save:
 		entry.flags.ignore_permissions = True
-		entry.save(ignore_permissions=True)
+		with transition():
+			entry.save(ignore_permissions=True)
 	return entry.status
 
 
@@ -344,8 +581,8 @@ def invalidate_approval(entry, why):
 	entry.db_set("approved_by", None, update_modified=False)
 	entry.db_set("approved_at", None, update_modified=False)
 	frappe.msgprint(
-		_("O processamento foi alterado depois da aprovação ({0}). Submeta-o novamente para "
-		  "aprovação.").format(why), title=_("Approval Invalidated"), indicator="orange")
+		_("The payroll changed after it was approved ({0}). Submit it for approval "
+		  "again.").format(why), title=_("Approval Invalidated"), indicator="orange")
 	return True
 
 
@@ -443,8 +680,9 @@ def assert_approval_intact(entry):
 	if current != stored:
 		totals = compute_totals(entry)
 		frappe.throw(
-			_("O processamento foi alterado depois da aprovação. Approved net was {0} for {1} "
-			  "employee(s); the payroll now totals {2} for {3}. Submit it again for approval.").format(
+			_("The payroll changed after it was approved. Approved net was {0} for {1} "
+			  "employee(s); the payroll now totals {2} for {3}. Submit it again for "
+			  "approval.").format(
 				flt(entry.get("approved_net")), cint(entry.get("approved_employees")),
 				totals["net"], totals["employees"]),
 			title=_("Approval No Longer Valid"),
@@ -476,8 +714,8 @@ def assert_slip_not_locked(slip):
 	state = entry_state(entry_name)
 	if state in LOCKED_STATES:
 		frappe.throw(
-			_("O processamento salarial {0} está {1} e não pode ser alterado. Cancele a "
-			  "aprovação (ou o processamento) antes de corrigir o recibo de {2}.").format(
+			_("Payroll {0} is {1} and cannot be changed. Cancel the approval (or the "
+			  "payroll) before correcting the payslip for {2}.").format(
 				frappe.bold(entry_name), _(state), slip.get("employee_name") or slip.get("employee")),
 			title=_("Payroll Locked"),
 		)
@@ -514,15 +752,54 @@ def assert_can_post(entry):
 	return rows
 
 
+def can_export(entry, user=None):
+	"""Whether the bank file button should be offered: the same checks as
+	:func:`assert_can_export`, as a boolean, for the screen."""
+	with quiet():
+		try:
+			user = user or frappe.session.user
+			perms.require(perms.PAYROLL_EXPORT_BANK, user=user)
+			perms.require_company(entry.get("company"), user=user)
+			_check_actor(entry, EXPORT_BANK, user=user)
+		except (frappe.ValidationError, frappe.PermissionError):
+			return False
+	return state_of(entry) in (PAYMENT_READY, PAID)
+
+
+def finance_flags(entry, user=None):
+	"""What Finance may do with this run right now — rendered, never trusted."""
+	user = user or frappe.session.user
+	state = state_of(entry)
+
+	def ok(capability, action):
+		with quiet():
+			try:
+				perms.require(capability, user=user)
+				perms.require_company(entry.get("company"), user=user)
+				_check_actor(entry, action, user=user)
+			except (frappe.ValidationError, frappe.PermissionError):
+				return False
+		return True
+
+	return {
+		"can_post": state in (APPROVED, POSTED) and ok(perms.PAYROLL_POST, POST),
+		"can_submit_slips": state in (APPROVED, POSTED, PAYMENT_READY) and ok(perms.PAYROLL_POST, POST),
+		"can_pay": state == PAYMENT_READY and ok(perms.PAYROLL_CONFIRM_PAYMENT, PAY),
+		"can_export_bank": can_export(entry, user=user),
+	}
+
+
 def assert_can_export(entry):
-	"""Bank files may only be produced for payroll that is approved, posted and released."""
+	"""Bank files may only be produced for payroll that is approved, posted and released,
+	by Finance, and never by the person who prepared it."""
 	state = state_of(entry)
 	perms.require(perms.PAYROLL_EXPORT_BANK)
 	perms.require_company(entry.get("company"))
+	_check_actor(entry, EXPORT_BANK)
 	if state not in (PAYMENT_READY, PAID):
 		frappe.throw(
-			_("O ficheiro bancário só pode ser gerado depois do processamento ser aprovado, "
-			  "contabilizado e libertado para pagamento. Estado actual: {0}.").format(_(state)),
+			_("The bank file can only be generated after the payroll has been approved, "
+			  "posted and released for payment. Current state: {0}.").format(_(state)),
 			title=_("Payroll Not Ready for Payment"),
 		)
 	return True
@@ -535,8 +812,8 @@ def assert_can_pay(entry):
 	_check_actor(entry, PAY)
 	if state not in (PAYMENT_READY, PAID):
 		frappe.throw(
-			_("Não é possível pagar um processamento no estado {0}. Aprove e contabilize o "
-			  "processamento primeiro.").format(_(state)), title=_("Payment Not Authorised"))
+			_("A payroll in state {0} cannot be paid. Approve and post the payroll "
+			  "first.").format(_(state)), title=_("Payment Not Authorised"))
 	return True
 
 
@@ -559,5 +836,6 @@ def refresh_payment_state(entry, save=True):
 	entry.status = PAID
 	entry.paid_at = now()
 	if save:
-		entry.save(ignore_permissions=True)
+		with transition():
+			entry.save(ignore_permissions=True)
 	return entry.status

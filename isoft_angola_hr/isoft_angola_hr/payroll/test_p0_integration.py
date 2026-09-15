@@ -125,7 +125,25 @@ class PayrollFixture(FrappeTestCase):
 				existing[abbr].account = account
 			else:
 				s.append("component_accounts", {"abbr": abbr, "account": account})
-		s.save(ignore_permissions=True)
+		# The fixture's own moves are not Finance decisions: they are not written to the
+		# mapping-change log (test runs only; production always logs).
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
+		with pa.unlogged_mapping():
+			s.save(ignore_permissions=True)
+		# The site may hold a real posted payroll booked under the real mapping. Against
+		# the fixture mapping that is drift, which blocks approval until Finance confirms
+		# the mapping — so the fixture records that confirmation for its own mapping, as
+		# a tracked row deleted with everything else.
+		frappe.clear_cache(doctype="Isoft HR Settings")
+		last = pa.last_posted_run(cls.company)
+		cls._track(frappe.get_doc({
+			"doctype": "Isoft Payroll Account Change", "company": cls.company,
+			"account_key": pa.MAPPING_CONFIRMED,
+			"label": PREFIX + " fixture confirmation of the test mapping",
+			"changed_by": "Administrator", "changed_on": frappe.utils.now(),
+			"after_posting": 1 if last else 0, "posted_payroll": last.name if last else None,
+			"note": pa.mapping_snapshot(),
+		}).insert(ignore_permissions=True))
 
 	@classmethod
 	def _track(cls, doc):
@@ -145,13 +163,15 @@ class PayrollFixture(FrappeTestCase):
 		# Restore the settings singleton to exactly what it was before the fixture ran.
 		backup = getattr(cls, "_settings_backup", None)
 		if backup:
+			from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
 			s = frappe.get_single("Isoft HR Settings")
 			s.payroll_payable_account = backup["payroll_payable_account"]
 			s.salary_payment_account = backup["salary_payment_account"]
 			s.set("component_accounts", [])
 			for row in backup["component_accounts"]:
 				s.append("component_accounts", row)
-			s.save(ignore_permissions=True)
+			with pa.unlogged_mapping():
+				s.save(ignore_permissions=True)
 
 		# Salary History rows are written by the profile's on_update hook and hold a Link
 		# to the Employee, so they must go FIRST — otherwise the link check refuses to
@@ -204,6 +224,122 @@ class PayrollFixture(FrappeTestCase):
 	def tearDown(self):
 		frappe.db.rollback(save_point="ahr_test")
 
+	# ------------------------------------------------------------------ #
+	# Slips live inside a payroll run (F-02). A salary slip can no longer be created,
+	# submitted, posted or paid outside an Isoft Payroll Entry that lists it, so the
+	# fixture keeps one run per company and period and enrols every test slip in it.
+	# The run's state is written with frappe.db.set_value on purpose: walking the real
+	# workflow needs two more users per test, and the state machine has its own tests.
+	# ------------------------------------------------------------------ #
+	#: Recorded as the preparer and the approver of every fixture run: real User records
+	#: (the fields are Links and are validated on save) with no roles, which never log
+	#: in. They exist so that the test session — Administrator — is neither the preparer
+	#: nor the approver of a fixture run and may therefore post and pay it as Finance
+	#: (F-03: the preparer never posts, the approver never pays).
+	RUN_PREPARER = "_test.ahr.preparer@example.invalid"
+	RUN_APPROVER = "_test.ahr.approver@example.invalid"
+	RUN_FINANCE = "_test.ahr.finance@example.invalid"
+
+	@classmethod
+	def _ensure_run_approver(cls):
+		for email, label in ((cls.RUN_PREPARER, "Preparer"), (cls.RUN_APPROVER, "Approver"),
+		                     (cls.RUN_FINANCE, "Finance")):
+			if not frappe.db.exists("User", email):
+				cls._track(frappe.get_doc({
+					"doctype": "User", "email": email, "first_name": PREFIX + " " + label,
+					"send_welcome_email": 0, "enabled": 0,
+				}).insert(ignore_permissions=True))
+		return cls.RUN_APPROVER
+
+	@classmethod
+	def payroll_run(cls, start=None, end=None, company=None):
+		"""The Isoft Payroll Entry test slips belong to, created (and tracked) on demand."""
+		from frappe.utils import getdate
+
+		cls._ensure_run_approver()
+		company = company or cls.company
+		start, end = getdate(start or cls.start), getdate(end or cls.end)
+		runs = cls.__dict__.get("_runs")
+		if runs is None:
+			runs = cls._runs = {}
+		key = (company, str(start), str(end))
+		name = runs.get(key)
+		if name and frappe.db.exists("Isoft Payroll Entry", name):
+			return name
+		entry = frappe.get_doc({
+			"doctype": "Isoft Payroll Entry", "company": company, "posting_date": end,
+			"start_date": start, "end_date": end,
+			"payroll_group": "{0} {1}".format(PREFIX, cls.__name__)[:140],
+		}).insert(ignore_permissions=True)
+		cls._track(entry)
+		runs[key] = entry.name
+		return entry.name
+
+	def approve_run(self, entry_name, state=None):
+		"""Stamp the run as approved and released, as Finance would have, so its slips
+		can be submitted, posted and paid. SQL on purpose (see the note above)."""
+		from frappe.utils import now
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+
+		self._ensure_run_approver()
+		entry = frappe.get_doc("Isoft Payroll Entry", entry_name)
+		frappe.db.set_value("Isoft Payroll Entry", entry_name, {
+			"status": state or wf.PAYMENT_READY,
+			"prepared_by": self.RUN_PREPARER, "submitted_by": self.RUN_PREPARER,
+			"approved_by": self.RUN_APPROVER, "approved_at": now(),
+			"approval_fingerprint": wf.compute_fingerprint(entry),
+		}, update_modified=False)
+
+	def insert_slip(self, values, submit=True):
+		"""Create a salary slip inside the fixture's payroll run for its period, enrol it
+		in the run's employee table, and — when asked — submit it the way
+		``submit_salary_slips`` does: after approval, under ``wf.unlocked()``."""
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+
+		values = dict(values)
+		values.setdefault("doctype", "Isoft Salary Slip")
+		values.setdefault("company", self.company)
+		entry_name = values.get("payroll_entry") or self.payroll_run(
+			values["start_date"], values["end_date"], values["company"])
+		values["payroll_entry"] = entry_name
+		# A run is only writable while it is not approved; a test may have approved it
+		# for an earlier slip.
+		frappe.db.set_value("Isoft Payroll Entry", entry_name, "status", wf.CALCULATED,
+		                    update_modified=False)
+		slip = frappe.get_doc(values).insert(ignore_permissions=True)
+		entry = frappe.get_doc("Isoft Payroll Entry", entry_name)
+		if not any(r.salary_slip == slip.name for r in entry.employees):
+			entry.append("employees", {
+				"employee": slip.employee, "employee_name": slip.employee_name,
+				"salary_profile": slip.salary_profile, "salary_slip": slip.name,
+				"net_pay": slip.net_pay,
+			})
+			entry.save(ignore_permissions=True)
+		if submit:
+			self.submit_slip(slip)
+		return slip
+
+	def submit_slip(self, slip):
+		"""Submit a draft slip the way ``submit_salary_slips`` does: once its run is
+		approved, under ``wf.unlocked()``. The slip's own rules (negative net, advance
+		recovery) still apply."""
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+
+		self.approve_run(slip.payroll_entry)
+		with wf.unlocked():
+			slip.submit()
+		return slip
+
+	def cancel_slip(self, slip):
+		"""Cancel a slip of an approved run the way cancel_payroll_entry does: under
+		``wf.unlocked()``. Whatever else refuses the cancellation (a live Journal Entry)
+		still refuses it."""
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+
+		with wf.unlocked():
+			slip.cancel()
+		return slip
+
 	def make_slip(self, submit=True, **kwargs):
 		values = {
 			"doctype": "Isoft Salary Slip", "employee": self.employee.name,
@@ -212,10 +348,7 @@ class PayrollFixture(FrappeTestCase):
 			"salary_profile": self.profile.name,
 		}
 		values.update(kwargs)
-		slip = frappe.get_doc(values).insert(ignore_permissions=True)
-		if submit:
-			slip.submit()
-		return slip
+		return self.insert_slip(values, submit=submit)
 
 
 # --------------------------------------------------------------------------- #
@@ -315,15 +448,16 @@ class TestPayrollAccounting(PayrollFixture):
 		slip = self.make_slip()
 		api.make_journal_entry(slip.name)
 		slip.reload()
-		with self.assertRaises(frappe.ValidationError):
-			slip.cancel()
+		with self.assertRaises(frappe.ValidationError) as cm:
+			self.cancel_slip(slip)
+		self.assertIn("still in the ledger", str(cm.exception))
 
 	def test_slip_can_be_cancelled_after_the_entry_is_cancelled(self):
 		slip = self.make_slip()
 		je_name = api.make_journal_entry(slip.name)
 		frappe.get_doc("Journal Entry", je_name).cancel()
 		slip.reload()
-		slip.cancel()
+		self.cancel_slip(slip)
 		self.assertEqual(slip.docstatus, 2)
 
     # ---- status semantics ----
@@ -359,8 +493,10 @@ class TestNegativeNetBlocked(PayrollFixture):
 	def test_draft_may_show_it_but_submission_is_blocked(self):
 		slip = self.make_slip(submit=False, adiantamento=500000)
 		self.assertLess(flt(slip.net_pay), 0)   # visible to HR
-		with self.assertRaises(frappe.ValidationError):
-			slip.submit()
+		with self.assertRaises(frappe.ValidationError) as cm:
+			self.submit_slip(slip)
+		self.assertIn("Deductions exceed remuneration", str(cm.exception),
+		              "the negative-net rule, not the workflow, must be what refuses it")
 
 
 # --------------------------------------------------------------------------- #
@@ -530,7 +666,27 @@ class TestBankExport(PayrollFixture):
 				"salary_profile": self.profile.name, "salary_slip": slip.name,
 			}],
 		}).insert(ignore_permissions=True)
-		entry.db_set("status", status, update_modified=False)
+		self._ensure_run_approver()
+		# Prepared and approved by fixture identities, so the test session (Finance
+		# here) is neither — the preparer may not export and the approver may not pay.
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+		values = {
+			"status": status, "prepared_by": self.RUN_PREPARER,
+			"submitted_by": self.RUN_PREPARER, "approved_by": self.RUN_APPROVER,
+		}
+		if status in (wf.APPROVED, wf.POSTED, wf.PAYMENT_READY, wf.PAID, wf.CLOSED):
+			# What the bank file checks from the record: an approval snapshot, a release
+			# stamp and — for a submitted slip — the accrual actually in the ledger.
+			values.update({"approval_fingerprint": wf.compute_fingerprint(entry),
+			               "approved_at": frappe.utils.now()})
+		if status in (wf.PAYMENT_READY, wf.PAID, wf.CLOSED):
+			values.update({"payment_authorized_by": self.RUN_FINANCE,
+			               "payment_authorized_at": frappe.utils.now(),
+			               "posted_by": self.RUN_FINANCE, "posted_at": frappe.utils.now()})
+		frappe.db.set_value("Isoft Payroll Entry", entry.name, values, update_modified=False)
+		if status in (wf.POSTED, wf.PAYMENT_READY, wf.PAID, wf.CLOSED) and slip.docstatus == 1 \
+				and not slip.journal_entry:
+			api.make_journal_entry(slip.name)
 		entry.reload()
 		return entry
 
@@ -569,8 +725,11 @@ class TestBankExport(PayrollFixture):
 		frappe.response.pop("filecontent", None)
 		slip.reload()
 		self.assertFalse(slip.payment_entry)
+		# The accrual is in the ledger (a bank file requires it); the payment is not.
 		self.assertEqual(
-			api._slip_status(slip.docstatus, slip.journal_entry, slip.payment_entry), "Submitted")
+			api._slip_status(slip.docstatus, slip.journal_entry, slip.payment_entry), "Posted")
+		self.assertNotEqual(
+			api._slip_status(slip.docstatus, slip.journal_entry, slip.payment_entry), "Paid")
 
 
 # --------------------------------------------------------------------------- #

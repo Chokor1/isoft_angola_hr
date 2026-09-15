@@ -44,6 +44,27 @@ from isoft_angola_hr.isoft_angola_hr.services import performance
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import salary_change as sc
 
+def _separation_required(test, module, attr="requires_separate_approval"):
+	"""Pin the segregation switch this test is about, without touching the database.
+
+	These switches are configuration: a department running the application with one HR
+	Manager clears them, and this site does. A test asserting a refusal must therefore
+	state the configuration it asserts under, or it is really testing whatever the site
+	happens to be set to. Patching the reader keeps it inside the test - a DB write here
+	would escape the fixture's savepoint and leak into every later test.
+
+	``module`` may be the module object or its name under services.
+	"""
+	import importlib
+	from unittest import mock
+	if isinstance(module, str):
+		module = importlib.import_module(
+			"isoft_angola_hr.isoft_angola_hr.services." + module)
+	patcher = mock.patch.object(module, attr, return_value=1)
+	patcher.start()
+	test.addCleanup(patcher.stop)
+
+
 
 class HROperatedFixture(ReleaseFixture):
 	"""An employee with NO login and NO manager, plus the two HR actors.
@@ -459,6 +480,7 @@ class TestHROperatedControls(HROperatedFixture):
 			ops.create_bank_change(self.offline, "AO06000600000100037131901")
 
 	def test_the_hr_user_who_requests_a_salary_change_cannot_approve_it(self):
+		_separation_required(self, 'salary_change')
 		self.as_hr_manager()
 		change = frappe.get_doc({
 			"doctype": "Isoft Salary Change", "employee": self.offline, "company": self.company,
@@ -473,6 +495,7 @@ class TestHROperatedControls(HROperatedFixture):
 			sc.perform(change, sc.APPROVE)
 
 	def test_the_hr_user_who_records_an_advance_cannot_approve_it(self):
+		_separation_required(self, 'advances')
 		self.as_hr_manager()
 		advance = frappe.get_doc({
 			"doctype": "Isoft Salary Advance", "employee": self.offline,
@@ -555,10 +578,23 @@ class TestHROperatedControls(HROperatedFixture):
 	def test_the_self_approval_policy_matches_what_is_enforced(self):
 		"""The published table must be derived, not written. A policy document that can
 		drift away from the code is worse than none."""
+		# The configurable rows must REPORT the live setting rather than a fixed answer —
+		# that is the point of deriving the table. Both positions are asserted, because a
+		# table that only happens to agree with today's configuration proves nothing.
 		self.as_hr()
+		_separation_required(self, "salary_change")
+		_separation_required(self, "advances")
 		rows = {r["process"]: r for r in ops.self_approval_policy()}
 		self.assertFalse(rows["Salary change"]["same_user"])
 		self.assertFalse(rows["Salary advance"]["same_user"])
+
+		from unittest import mock
+		from isoft_angola_hr.isoft_angola_hr.services import salary_change as _sc
+		with mock.patch.object(_sc, "requires_separate_approval", return_value=0):
+			relaxed = {r["process"]: r for r in ops.self_approval_policy()}
+		self.assertTrue(relaxed["Salary change"]["same_user"],
+		                "the table did not follow the setting it claims to read")
+
 		self.assertFalse(rows["Bank change"]["same_user"])
 		self.assertTrue(rows["Leave"]["same_user"])
 		# Payroll segregation is explicitly out of scope for HR-operated mode (§39).
@@ -646,3 +682,273 @@ class TestHROperatedEndpoints(HROperatedFixture):
 		self.as_hr()
 		with self.assertRaises(frappe.ValidationError):
 			ops.record_interview_result("nonexistent", "Maybe")
+
+
+# --------------------------------------------------------------------------- #
+# Workflow buttons — the transitions must be reachable from a UI, not only Python
+# --------------------------------------------------------------------------- #
+class TestWorkflowButtonEndpoints(HROperatedFixture):
+	"""The state machines were implemented, tested and whitelisted, but nothing in any
+	UI called them: a record created in the Desk sat in Draft with no visible way to
+	submit or approve it. These tests cover the endpoints the buttons use."""
+
+	def _advance(self):
+		return frappe.get_doc({
+			"doctype": "Isoft Salary Advance", "employee": self.employee.name,
+			"company": self.company, "request_date": nowdate(),
+			"requested_amount": 50000, "approved_amount": 50000,
+			"installments": 2, "installment_amount": 25000,
+			"recovery_start_date": nowdate(), "reason": PREFIX + " button test",
+		}).insert(ignore_permissions=True)
+
+	def test_actions_are_offered_for_the_state_the_record_is_in(self):
+		from isoft_angola_hr.isoft_angola_hr import hr_api
+
+		adv = self._advance()
+		out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+		self.assertEqual(out["status"], "Draft")
+		self.assertIn("submit_for_approval", [a["action"] for a in out["actions"]])
+		# Nothing may be approved straight out of Draft.
+		self.assertNotIn("approve", [a["action"] for a in out["actions"]])
+
+	def test_every_offered_action_carries_a_label(self):
+		from isoft_angola_hr.isoft_angola_hr import hr_api
+
+		adv = self._advance()
+		for a in hr_api.document_actions("Isoft Salary Advance", adv.name)["actions"]:
+			self.assertTrue((a.get("label") or "").strip(),
+			                "a button with no label cannot be drawn")
+
+	def test_performing_an_action_moves_the_record_and_stamps_it(self):
+		from isoft_angola_hr.isoft_angola_hr import hr_api
+
+		adv = self._advance()
+		out = hr_api.perform_document_action(
+			"Isoft Salary Advance", adv.name, "submit_for_approval")
+		adv.reload()
+		self.assertEqual(out["status"], "Pending Approval")
+		self.assertEqual(adv.status, "Pending Approval")
+		self.assertTrue(adv.requested_by)
+
+	def test_an_action_not_offered_is_refused_when_called_directly(self):
+		# A stale page must not be able to approve anything: the button is absent, and
+		# forging the call is refused too.
+		from isoft_angola_hr.isoft_angola_hr import hr_api
+
+		adv = self._advance()
+		with self.assertRaises(Exception):
+			hr_api.perform_document_action("Isoft Salary Advance", adv.name, "approve")
+
+	def test_an_unknown_doctype_has_no_workflow(self):
+		from isoft_angola_hr.isoft_angola_hr import hr_api
+
+		with self.assertRaises(Exception):
+			hr_api.document_actions("Employee", self.employee.name)
+
+	def test_listed_rows_carry_the_actions_the_dashboard_draws(self):
+		from isoft_angola_hr.isoft_angola_hr import hr_api
+
+		adv = self._advance()
+		rows = hr_api.list_advances(company=self.company)
+		self.assertTrue(rows)
+		for r in rows:
+			self.assertIn("actions", r, "the dashboard must not decide this for itself")
+
+		mine = [r for r in rows if r["name"] == adv.name]
+		self.assertEqual(len(mine), 1, "the advance just created must be listed")
+		self.assertIn("submit_for_approval", [a["action"] for a in mine[0]["actions"]])
+
+
+# --------------------------------------------------------------------------- #
+# The four questions an approval screen must answer
+# --------------------------------------------------------------------------- #
+class TestWorkflowSummary(HROperatedFixture):
+	"""Status, who must act, what I can do, what happens next — all derived from the
+	transition table so a screen cannot describe a workflow differently from the rule."""
+
+	def _advance(self, status=None):
+		doc = frappe.get_doc({
+			"doctype": "Isoft Salary Advance", "employee": self.employee.name,
+			"company": self.company, "request_date": nowdate(),
+			"requested_amount": 50000, "approved_amount": 50000,
+			"installments": 2, "installment_amount": 25000,
+			"recovery_start_date": nowdate(), "reason": PREFIX + " summary",
+		}).insert(ignore_permissions=True)
+		if status:
+			frappe.db.set_value("Isoft Salary Advance", doc.name, "status", status)
+		return doc
+
+	def test_a_pending_record_names_the_role_that_must_act(self):
+		adv = self._advance("Pending Approval")
+		out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+
+		self.assertEqual(out["status"], "Pending Approval")
+		self.assertTrue(out["waiting_for"], "the screen must say who is being waited on")
+		self.assertIn("HR Manager", out["waiting_for"])
+		self.assertIn("Approve", out["next_action"])
+
+	def test_the_progress_strip_marks_exactly_one_current_stage(self):
+		adv = self._advance("Approved")
+		out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+		states = [p["state"] for p in out["progress"]]
+
+		self.assertEqual(states.count("current"), 1)
+		current = next(p for p in out["progress"] if p["state"] == "current")
+		self.assertEqual(current["stage"], "Approved")
+		# Everything before it is done, everything after is pending.
+		i = out["progress"].index(current)
+		self.assertTrue(all(p["state"] == "done" for p in out["progress"][:i]))
+		self.assertTrue(all(p["state"] == "pending" for p in out["progress"][i + 1:]))
+
+	def test_a_stage_reached_without_a_button_says_so(self):
+		# Disbursed -> Recovering happens when payroll takes an instalment. Telling HR
+		# there is "no further action" would send them looking for a button.
+		adv = self._advance("Disbursed")
+		out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+		self.assertIn("automatic", out["next_action"].lower())
+		self.assertIsNone(out["waiting_for"])
+
+	def test_a_finished_record_offers_no_next_step(self):
+		adv = self._advance("Settled")
+		out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+		self.assertIsNone(out["waiting_for"])
+		self.assertNotIn("Approve", out["next_action"])
+
+	def test_next_action_never_advertises_a_rejection_as_the_next_step(self):
+		adv = self._advance("Pending Approval")
+		out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+		self.assertNotIn("Reject", out["next_action"])
+
+
+# --------------------------------------------------------------------------- #
+# Separation of duties holds against a forged call, not only a hidden button
+# --------------------------------------------------------------------------- #
+class TestSelfApprovalIsRefusedByTheServer(HROperatedFixture):
+	def _requester(self):
+		email = "selfapprove." + PREFIX.lower().replace(" ", "") + "@example.invalid"
+		if not frappe.db.exists("User", email):
+			u = frappe.get_doc({
+				"doctype": "User", "email": email, "first_name": PREFIX + " Selfapprover",
+				"send_welcome_email": 0,
+				# Deliberately BOTH: this user may request and may approve. Only the
+				# self-approval rule stands between them and approving their own request.
+				"roles": [{"role": "HR User"}, {"role": "HR Manager"}],
+			}).insert(ignore_permissions=True)
+			self._created.append(("User", u.name))
+		return email
+
+	def test_requester_cannot_approve_their_own_advance_even_holding_the_role(self):
+		_separation_required(self, 'advances')
+		user = self._requester()
+		frappe.set_user(user)
+		try:
+			adv = frappe.get_doc({
+				"doctype": "Isoft Salary Advance", "employee": self.employee.name,
+				"company": self.company, "request_date": nowdate(),
+				"requested_amount": 30000, "approved_amount": 30000,
+				"installments": 1, "installment_amount": 30000,
+				"recovery_start_date": nowdate(), "reason": PREFIX + " self",
+			}).insert()
+			hr_api.perform_document_action(
+				"Isoft Salary Advance", adv.name, "submit_for_approval")
+
+			# The button is not offered...
+			out = hr_api.document_actions("Isoft Salary Advance", adv.name)
+			self.assertNotIn("approve", [a["action"] for a in out["actions"]])
+
+			# ...and forging the call anyway is refused by the server.
+			with self.assertRaises(Exception):
+				hr_api.perform_document_action("Isoft Salary Advance", adv.name, "approve")
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_requester_cannot_approve_their_own_salary_change(self):
+		_separation_required(self, 'salary_change')
+		user = self._requester()
+		frappe.set_user(user)
+		try:
+			boundary = hr_api.next_payroll_boundary()["next_start"]
+			change = frappe.get_doc({
+				"doctype": "Isoft Salary Change", "employee": self.employee.name,
+				"company": self.company, "change_type": "Merit Increase",
+				"new_base": 987000, "effective_date": boundary,
+				"reason": PREFIX + " self",
+			}).insert()
+			hr_api.perform_document_action(
+				"Isoft Salary Change", change.name, "submit_for_approval")
+
+			out = hr_api.document_actions("Isoft Salary Change", change.name)
+			self.assertNotIn("approve", [a["action"] for a in out["actions"]])
+			with self.assertRaises(Exception):
+				hr_api.perform_document_action("Isoft Salary Change", change.name, "approve")
+		finally:
+			frappe.set_user("Administrator")
+
+
+# --------------------------------------------------------------------------- #
+# Write access must not become an approval bypass
+# --------------------------------------------------------------------------- #
+class TestApprovedTermsAreLocked(HROperatedFixture):
+	def _hr_user(self):
+		email = "hruser." + PREFIX.lower().replace(" ", "") + "@example.invalid"
+		if not frappe.db.exists("User", email):
+			u = frappe.get_doc({
+				"doctype": "User", "email": email, "first_name": PREFIX + " HRUser",
+				"send_welcome_email": 0, "roles": [{"role": "HR User"}],
+			}).insert(ignore_permissions=True)
+			self._created.append(("User", u.name))
+		return email
+
+	def test_hr_user_can_open_and_create_an_advance(self):
+		# Regression: HR User held advance.request but had no DocType permission at all,
+		# so the record could not even be read.
+		user = self._hr_user()
+		frappe.set_user(user)
+		try:
+			adv = frappe.get_doc({
+				"doctype": "Isoft Salary Advance", "employee": self.employee.name,
+				"company": self.company, "request_date": nowdate(),
+				"requested_amount": 20000, "approved_amount": 20000,
+				"installments": 1, "installment_amount": 20000,
+				"recovery_start_date": nowdate(), "reason": PREFIX + " hruser",
+			}).insert()
+			frappe.get_doc("Isoft Salary Advance", adv.name).check_permission("read")
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_a_non_approver_cannot_edit_the_terms_after_submission(self):
+		user = self._hr_user()
+		frappe.set_user(user)
+		try:
+			adv = frappe.get_doc({
+				"doctype": "Isoft Salary Advance", "employee": self.employee.name,
+				"company": self.company, "request_date": nowdate(),
+				"requested_amount": 20000, "approved_amount": 20000,
+				"installments": 1, "installment_amount": 20000,
+				"recovery_start_date": nowdate(), "reason": PREFIX + " lock",
+			}).insert()
+			hr_api.perform_document_action(
+				"Isoft Salary Advance", adv.name, "submit_for_approval")
+
+			adv.reload()
+			adv.approved_amount = 900000
+			with self.assertRaises(Exception):
+				adv.save()
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_terms_are_frozen_once_the_money_has_moved(self):
+		adv = frappe.get_doc({
+			"doctype": "Isoft Salary Advance", "employee": self.employee.name,
+			"company": self.company, "request_date": nowdate(),
+			"requested_amount": 20000, "approved_amount": 20000,
+			"installments": 1, "installment_amount": 20000,
+			"recovery_start_date": nowdate(), "reason": PREFIX + " frozen",
+		}).insert(ignore_permissions=True)
+		frappe.db.set_value("Isoft Salary Advance", adv.name, "status", "Disbursed")
+
+		adv.reload()
+		adv.approved_amount = 999999
+		# Even an approver may not rewrite terms after disbursement.
+		with self.assertRaises(Exception):
+			adv.save(ignore_permissions=True)

@@ -129,7 +129,7 @@
 		// A traceback must never reach the screen. If that is all we have, say something
 		// true and useful instead of leaking file paths and line numbers.
 		if (/Traceback \(most recent call last\)/.test(msg)) msg = "";
-		if (!msg) return __("Não foi possível concluir a operação. Tente novamente ou contacte o RH.");
+		if (!msg) return __("The operation could not be completed. Try again or contact HR.");
 		for (var i = 0; i < FRIENDLY.length; i++) {
 			if (FRIENDLY[i][0].test(msg)) return __(FRIENDLY[i][1]);
 		}
@@ -170,7 +170,7 @@
 				if (res.ok) return payload.message;
 				if (res.status === 401 || res.status === 403) {
 					var e401 = new Error(serverMessage(payload) ||
-						__("A sua sessão expirou. Inicie sessão novamente."));
+						__("Your session has expired. Please sign in again."));
 					e401.status = res.status;
 					throw e401;
 				}
@@ -310,14 +310,14 @@
 			'<form class="ss-modal" novalidate>' +
 				'<div class="ss-modal-head"><h2>' + esc(opts.title) + "</h2>" +
 					'<button type="button" class="ss-modal-close" aria-label="' +
-					esc(__("Fechar")) + '">&times;</button></div>' +
+					esc(__("Close")) + '">&times;</button></div>' +
 				'<div class="ss-modal-body">' + (opts.html || "") + body +
 					'<div class="ss-modal-error"></div></div>' +
 				'<div class="ss-modal-foot">' +
 					'<button type="button" class="ss-btn ss-cancel">' +
-					esc(opts.cancelLabel || __("Cancelar")) + "</button>" +
+					esc(opts.cancelLabel || __("Cancel")) + "</button>" +
 					'<button type="submit" class="ss-btn primary ss-ok">' +
-					esc(opts.okLabel || __("Confirmar")) + "</button>" +
+					esc(opts.okLabel || __("Confirm")) + "</button>" +
 				"</div>" +
 			"</form>";
 
@@ -365,7 +365,7 @@
 				msgEl.hidden = true;
 				if (f.required && !String(values[f.name] || "").trim()) {
 					wrap.classList.add("err");
-					msgEl.textContent = __("Campo obrigatório.");
+					msgEl.textContent = __("This field is required.");
 					msgEl.hidden = false;
 					if (!bad) bad = wrap;
 				}
@@ -376,7 +376,7 @@
 			}
 			var okBtn = SS.qs(".ss-ok", form);
 			okBtn.disabled = true;
-			okBtn.textContent = __("A processar…");
+			okBtn.textContent = __("Working…");
 			errBox.innerHTML = "";
 			Promise.all(pending)
 				.then(function () { return opts.onSubmit(values, form); })
@@ -389,7 +389,7 @@
 				})
 				.then(function () {
 					okBtn.disabled = false;
-					okBtn.textContent = opts.okLabel || __("Confirmar");
+					okBtn.textContent = opts.okLabel || __("Confirm");
 				});
 		});
 
@@ -413,7 +413,7 @@
 			var file = input && input.files && input.files[0];
 			if (!file) return resolve(null);
 			if (file.size > SS.MAX_UPLOAD_MB * 1024 * 1024) {
-				return reject(new Error(__("O ficheiro tem mais de {0} MB.",
+				return reject(new Error(__("The file is larger than {0} MB.",
 					[SS.MAX_UPLOAD_MB])));
 			}
 			var reader = new FileReader();
@@ -425,7 +425,7 @@
 					size: file.size });
 			};
 			reader.onerror = function () {
-				reject(new Error(__("Não foi possível ler o ficheiro.")));
+				reject(new Error(__("The file could not be read.")));
 			};
 			reader.readAsDataURL(file);
 		});
@@ -458,7 +458,7 @@
 				'<div class="ss-avatar" aria-hidden="true">…</div>' +
 				'<div><h1 class="ss-title">' + esc(this.cfg.title) + "</h1>" +
 				'<div class="ss-sub"></div></div></div></div>' +
-			'<nav class="ss-nav" aria-label="' + esc(__("Secções")) + '"></nav>' +
+			'<nav class="ss-nav" aria-label="' + esc(__("Sections")) + '"></nav>' +
 			'<div class="ss-body"><div class="ss-view" tabindex="-1"></div></div>' +
 			'<div id="ss-live" class="ss-sr" role="status" aria-live="polite"></div>';
 
@@ -482,7 +482,7 @@
 			'<i class="fa fa-exclamation-triangle" aria-hidden="true"></i><span>' +
 			esc(msg) + "</span></div>" +
 			(err && err.status === 403
-				? '<a class="ss-btn primary block" href="/login">' + esc(__("Iniciar sessão")) + "</a>"
+				? '<a class="ss-btn primary block" href="/login">' + esc(__("Sign in")) + "</a>"
 				: "");
 	};
 

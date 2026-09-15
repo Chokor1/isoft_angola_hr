@@ -23,6 +23,27 @@ from isoft_angola_hr.isoft_angola_hr.services import manager_self_service as mss
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import salary_change as sc
 
+def _separation_required(test, module, attr="requires_separate_approval"):
+	"""Pin the segregation switch this test is about, without touching the database.
+
+	These switches are configuration: a department running the application with one HR
+	Manager clears them, and this site does. A test asserting a refusal must therefore
+	state the configuration it asserts under, or it is really testing whatever the site
+	happens to be set to. Patching the reader keeps it inside the test - a DB write here
+	would escape the fixture's savepoint and leak into every later test.
+
+	``module`` may be the module object or its name under services.
+	"""
+	import importlib
+	from unittest import mock
+	if isinstance(module, str):
+		module = importlib.import_module(
+			"isoft_angola_hr.isoft_angola_hr.services." + module)
+	patcher = mock.patch.object(module, attr, return_value=1)
+	patcher.start()
+	test.addCleanup(patcher.stop)
+
+
 
 class HRFixture(ControlFixture):
 	"""Payroll fixture plus an HR-shaped org: a manager, a report, and their users."""
@@ -119,6 +140,7 @@ class TestEmploymentContract(HRFixture):
 		self.assertEqual(doc.approved_by, "Administrator")
 
 	def test_preparer_cannot_approve_their_own_contract(self):
+		_separation_required(self, 'contracts', 'require_separate_contract_approval')
 		doc = self.make_contract()
 		frappe.set_user(self.users["hruser"])
 		contracts.perform(doc, contracts.SUBMIT)
@@ -129,7 +151,7 @@ class TestEmploymentContract(HRFixture):
 		frappe.set_user(self.users["hruser"])
 		with self.assertRaises(frappe.ValidationError) as cm:
 			contracts.perform(doc, contracts.APPROVE)
-		self.assertIn("preparou", str(cm.exception))
+		self.assertIn("contract you prepared", str(cm.exception))
 
 	def test_overlapping_contracts_are_blocked(self):
 		self.approved_contract(start="2026-01-01", end="2026-12-31")
@@ -300,9 +322,10 @@ class TestSalaryChange(HRFixture):
 		start = self.next_period_start()
 		with self.assertRaises(frappe.ValidationError) as cm:
 			self.make_change(effective=add_days(start, 5))
-		self.assertIn("meio do período", str(cm.exception))
+		self.assertIn("falls in the middle of the period", str(cm.exception))
 
 	def test_requester_cannot_approve_their_own_salary_change(self):
+		_separation_required(self, 'salary_change')
 		frappe.set_user(self.users["officer"])
 		doc = self.make_change()
 		sc.perform(doc, sc.SUBMIT)
@@ -313,7 +336,7 @@ class TestSalaryChange(HRFixture):
 		doc.reload()
 		with self.assertRaises(frappe.ValidationError) as cm:
 			sc.perform(doc, sc.APPROVE)
-		self.assertIn("pediu", str(cm.exception))
+		self.assertIn("salary change you requested", str(cm.exception))
 
 	def test_applying_closes_the_old_profile_and_opens_a_new_one(self):
 		effective = self.next_period_start()
@@ -411,6 +434,7 @@ class TestSalaryAdvance(HRFixture):
 		self.assertAlmostEqual(flt(doc.outstanding_amount), 100000.00, places=2)
 
 	def test_requester_cannot_approve_their_own_advance(self):
+		_separation_required(self, 'advances')
 		frappe.set_user(self.users["officer"])
 		doc = self.make_advance()
 		advances.perform(doc, advances.SUBMIT)
@@ -421,7 +445,7 @@ class TestSalaryAdvance(HRFixture):
 		doc.reload()
 		with self.assertRaises(frappe.ValidationError) as cm:
 			advances.perform(doc, advances.APPROVE)
-		self.assertIn("pediu", str(cm.exception))
+		self.assertIn("advance you requested", str(cm.exception))
 
 	def test_approved_amount_cannot_exceed_the_request(self):
 		doc = self.make_advance(amount=50000)
@@ -461,7 +485,7 @@ class TestSalaryAdvance(HRFixture):
 		# Net pay falls by exactly the recovered installment.
 		self.assertAlmostEqual(flt(slip.net_pay), 232948.00 - 10000.00, places=2)
 
-		slip.submit()
+		self.submit_slip(slip)
 		self.assertAlmostEqual(advances.outstanding_for(self.employee.name), 20000.00, places=2)
 
 	def test_cancelling_payroll_gives_the_installment_back(self):
@@ -469,7 +493,7 @@ class TestSalaryAdvance(HRFixture):
 		doc.db_set("status", advances.DISBURSED, update_modified=False)
 		slip = self.make_slip()
 		self.assertAlmostEqual(advances.outstanding_for(self.employee.name), 20000.00, places=2)
-		slip.cancel()
+		self.cancel_slip(slip)
 		self.assertAlmostEqual(advances.outstanding_for(self.employee.name), 30000.00, places=2,
 		                       msg="a cancelled slip never recovered anything")
 
@@ -483,7 +507,7 @@ class TestSalaryAdvance(HRFixture):
 		                   "what could not be taken must stay outstanding, not vanish")
 		self.assertAlmostEqual(
 			flt(slip.advance_recovery) + flt(slip.advance_deferred), 900000.00, places=2)
-		slip.submit()   # a zero net is allowed; a negative one is not
+		self.submit_slip(slip)   # a zero net is allowed; a negative one is not
 
 	def test_full_recovery_settles_the_advance(self):
 		doc = self.approved_advance(amount=15000, installments=1)
@@ -587,16 +611,28 @@ class TestEmployeeSelfService(HRFixture):
 		self.assertIn(mine.name, [p["name"] for p in payslips])
 		detail = ess.my_payslip(mine.name)
 		self.assertAlmostEqual(flt(detail["net_pay"]), 232948.00, places=2)
-		self.assertIn("Segurança Social", detail["explanation"]["social_security"]["label"])
+		# The label is now an English msgid with a Portuguese translation, so asserting the
+		# Portuguese literal would only pass for a Portuguese session. Assert the same
+		# thing in BOTH languages instead: the block is labelled, and the label is the
+		# social-security one whichever language the employee reads it in.
+		label = detail["explanation"]["social_security"]["label"]
+		self.assertIn("Social Security", label)
+		lang = frappe.local.lang
+		try:
+			frappe.local.lang = "pt"
+			frappe.local.lang_full_dict = None
+			self.assertIn("Segurança Social",
+			              ess.my_payslip(mine.name)["explanation"]["social_security"]["label"])
+		finally:
+			frappe.local.lang = lang
+			frappe.local.lang_full_dict = None
 
 	def test_another_employees_payslip_is_denied(self):
 		frappe.db.set_value("Employee", self.report_employee, "user_id", None)
-		other_slip = frappe.get_doc({
-			"doctype": "Isoft Salary Slip", "employee": self.employee.name,
-			"company": self.company, "posting_date": self.end,
+		other_slip = self.insert_slip({
+			"employee": self.employee.name, "posting_date": self.end,
 			"start_date": self.start, "end_date": self.end,
-		}).insert(ignore_permissions=True)
-		other_slip.submit()
+		}, submit=True)
 		frappe.db.set_value("Employee", self.employee.name, "user_id", None)
 		frappe.db.set_value("Employee", self.report_employee, "user_id", self.employee_user)
 		frappe.set_user(self.employee_user)
@@ -648,7 +684,7 @@ class TestEmployeeSelfService(HRFixture):
 		frappe.set_user(self.employee_user)
 		with self.assertRaises(frappe.ValidationError) as cm:
 			frappe.get_doc("Isoft Bank Change Request", name).approve()
-		self.assertIn("próprios dados bancários", str(cm.exception))
+		self.assertIn("your own bank details", str(cm.exception))
 
 	def test_the_masked_iban_never_exposes_the_full_number(self):
 		frappe.db.set_value("Employee", self.employee.name, "custom_iban",
@@ -794,22 +830,33 @@ class TestHRReadiness(HRFixture):
 # Notifications
 # --------------------------------------------------------------------------- #
 class TestHRNotifications(HRFixture):
-	def test_contract_expiry_alerts_are_sent_once_per_threshold(self):
+	"""These used to assert that alerts WERE sent. The application no longer notifies
+	anybody — see services/notification_policy.py — so they now assert the opposite, on
+	the same fixture: a contract close enough to its expiry threshold that it would
+	certainly have alerted before.
+
+	Rewritten rather than deleted. A contract 25 days from expiry is exactly the case the
+	notification system existed for, and it is worth holding a test on it so that the
+	silence is demonstrated against real conditions rather than an empty site."""
+
+	def test_a_contract_near_expiry_alerts_nobody(self):
 		from isoft_angola_hr.isoft_angola_hr.services import hr_notifications as notify
 
 		self.approved_contract(start=add_days(getdate(nowdate()), -300),
 		                       end=add_days(getdate(nowdate()), 25))
-		first = notify.contract_expiry_alerts()
-		self.assertGreater(first, 0)
-		self.assertEqual(notify.contract_expiry_alerts(), 0,
-		                 "the same threshold must never alert twice")
+		before = frappe.db.sql("select count(*) from `tabNotification Log`")[0][0]
+		self.assertEqual(notify.contract_expiry_alerts(), 0)
+		self.assertEqual(frappe.db.sql(
+			"select count(*) from `tabNotification Log`")[0][0], before,
+			"a contract 25 days from expiry produced a notification")
 
-	def test_the_daily_sweep_runs_end_to_end(self):
+	def test_the_daily_sweep_produces_nothing_and_says_so(self):
 		from isoft_angola_hr.isoft_angola_hr.services import hr_notifications as notify
 
 		result = notify.run_daily_alerts()
+		self.assertTrue(result.get("disabled"))
 		for key in ("contract_expiry", "probation", "document_expiry", "pending_approvals"):
-			self.assertIn(key, result)
+			self.assertEqual(result[key], 0)
 
 
 # --------------------------------------------------------------------------- #

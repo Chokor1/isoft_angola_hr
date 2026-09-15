@@ -74,18 +74,29 @@ def slip_conditions(filters, alias="s"):
 
 
 PERIOD_FILTERS = [
-	{"fieldname": "company", "label": _("Company"), "fieldtype": "Link", "options": "Company",
+	{"fieldname": "company", "label": "Company", "fieldtype": "Link", "options": "Company",
 	 "reqd": 1},
-	{"fieldname": "from_date", "label": _("From Date"), "fieldtype": "Date", "reqd": 1},
-	{"fieldname": "to_date", "label": _("To Date"), "fieldtype": "Date", "reqd": 1},
-	{"fieldname": "employee", "label": _("Employee"), "fieldtype": "Link", "options": "Employee"},
-	{"fieldname": "department", "label": _("Department"), "fieldtype": "Link",
+	{"fieldname": "from_date", "label": "From Date", "fieldtype": "Date", "reqd": 1},
+	{"fieldname": "to_date", "label": "To Date", "fieldtype": "Date", "reqd": 1},
+	{"fieldname": "employee", "label": "Employee", "fieldtype": "Link", "options": "Employee"},
+	{"fieldname": "department", "label": "Department", "fieldtype": "Link",
 	 "options": "Department"},
-	{"fieldname": "payroll_entry", "label": _("Payroll Entry"), "fieldtype": "Link",
+	{"fieldname": "payroll_entry", "label": "Payroll Entry", "fieldtype": "Link",
 	 "options": "Isoft Payroll Entry"},
-	{"fieldname": "docstatus", "label": _("Payroll Status"), "fieldtype": "Select",
+	{"fieldname": "docstatus", "label": "Payroll Status", "fieldtype": "Select",
 	 "options": "Submitted\nDraft\nAll", "default": "Submitted"},
 ]
+
+
+def period_filters():
+	"""The standard report filters, translated for THIS request.
+
+	PERIOD_FILTERS holds msgids only. Wrapping them in _() where the list is defined
+	would translate them once, at import, and every later reader would get the language
+	the worker started in rather than their own.
+	"""
+	return [dict(f, label=_(f["label"])) for f in PERIOD_FILTERS]
+
 
 
 def column(label, fieldname, fieldtype="Data", width=120, options=None):

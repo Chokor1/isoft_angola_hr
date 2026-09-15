@@ -353,12 +353,12 @@ def _notify_state(doc, state):
 	try:
 		if state == PENDING_EMPLOYEE:
 			notify._tell(doc.employee,
-			             _("Avaliação de desempenho para revisão"),
+			             _("Performance review to complete"),
 			             _("Your performance review for {0} is ready for you to read and "
 			               "acknowledge.").format(doc.end_date), "Appraisal", doc.name)
 		elif state == FINALISED:
 			notify._tell(doc.employee,
-			             _("Avaliação de desempenho concluída"),
+			             _("Performance review finalised"),
 			             _("Your performance review for {0} has been finalised.").format(
 				             doc.end_date), "Appraisal", doc.name)
 	except Exception:
@@ -582,9 +582,9 @@ def reviews_due_alerts():
 			continue
 		overdue = cint(row.days_left) < 0
 		sent += notify._notify(
-			_("Avaliação de {0} — {1}").format(
+			_("Review of {0} — {1}").format(
 				row.employee_name,
-				_("em atraso") if overdue else _("{0} dias").format(row.days_left)),
+				_("overdue") if overdue else _("{0} dias").format(row.days_left)),
 			_("The performance review for {0} is due on {1}.").format(
 				row.employee_name, row.custom_due_date),
 			[user], "Appraisal", row.name)

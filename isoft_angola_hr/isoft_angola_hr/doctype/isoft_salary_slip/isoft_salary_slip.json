@@ -452,7 +452,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-06-29 00:00:00.000000",
+ "modified": "2026-09-08 10:00:00.000000",
  "modified_by": "Administrator",
  "module": "Isoft Angola HR",
  "name": "Isoft Salary Slip",
@@ -517,5 +517,6 @@
  ],
  "sort_field": "modified",
  "sort_order": "DESC",
- "track_changes": 1
+ "track_changes": 1,
+ "default_print_format": "Recibo de Vencimento"
 }

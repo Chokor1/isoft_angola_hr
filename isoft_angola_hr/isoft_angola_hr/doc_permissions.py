@@ -112,11 +112,19 @@ def employee_document_permission(doc, ptype=None, user=None):
 	distribution channel for exactly the data that most needs one.
 	"""
 	user = user or frappe.session.user
+
+	# Confidentiality first, and for everybody: a criminal-record check or an
+	# occupational medical certificate is HR-Manager-only whether the person asking is
+	# ordinary HR staff or the employee it concerns.
+	if cint(doc.get("confidential")):
+		from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
+		return perms.can(perms.DOCUMENT_CONFIDENTIAL, user=user)
+
+	# Everything below only ever NARROWS access. Frappe still applies the DocType's role
+	# permissions on top, so returning True here grants nothing on its own.
 	if _is_staff(user):
 		return True
-	if doc.get("employee") != employee_for(user):
-		return False
-	return not cint(doc.get("confidential"))
+	return doc.get("employee") == employee_for(user)
 
 
 # --------------------------------------------------------------------------- #

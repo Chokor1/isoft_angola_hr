@@ -16,7 +16,7 @@ move down to the record. :class:`TestSelfServiceIsolation` and
 """
 
 import frappe
-from frappe.utils import add_days, add_months, flt, getdate, nowdate
+from frappe.utils import cint, add_days, add_months, flt, getdate, nowdate
 
 from isoft_angola_hr.isoft_angola_hr import doc_permissions
 from isoft_angola_hr.isoft_angola_hr import hr_api
@@ -939,7 +939,12 @@ class TestLabourLawReference(UXFixture):
 # §74, §76, §77 — notifications
 # --------------------------------------------------------------------------- #
 class TestNotifications(UXFixture):
-	def test_a_notification_never_contains_an_amount(self):
+	def test_an_approved_payslip_notifies_the_employee_of_nothing(self):
+		"""This used to assert that the payslip notification carried no amount. The
+		application no longer notifies anybody at all, which subsumes it — so the
+		assertion is now that NO notification is produced, against the same real
+		submitted payroll. An employee with a login, a submitted slip and a net pay
+		figure is precisely the case that used to send one."""
 		from isoft_angola_hr.isoft_angola_hr.services import hr_notifications
 
 		entry = self.submitted_entry()
@@ -950,15 +955,16 @@ class TestNotifications(UXFixture):
 		self.addCleanup(
 			lambda: frappe.db.set_value("Employee", slip.employee, "user_id", None))
 		slip.docstatus = 1
-		hr_notifications.notify_payslip_available(slip)
 
-		logs = frappe.get_all("Notification Log",
-		                      filters={"for_user": self.employee_user},
-		                      fields=["subject", "email_content"])
-		for log in logs:
-			text = "{0} {1}".format(log.subject, log.email_content)
-			self.assertNotIn(str(flt(slip.net_pay, 2)), text,
-			                 "A notification must not carry the net pay figure.")
+		before = frappe.db.sql("select count(*) from `tabNotification Log`")[0][0]
+		hr_notifications.notify_payslip_available(slip)
+		self.assertEqual(
+			frappe.db.sql("select count(*) from `tabNotification Log`")[0][0], before,
+			"submitting a payslip notified the employee")
+		self.assertEqual(
+			frappe.get_all("Notification Log",
+			               filters={"for_user": self.employee_user}), [],
+			"the employee has a notification from this application")
 
 	def test_a_failing_notification_never_breaks_its_caller(self):
 		"""The wrapper is the whole reason a payroll submission cannot be taken down
@@ -992,3 +998,362 @@ class TestNotifications(UXFixture):
 		self.assertEqual(centre["pending_approvals"], [])
 		self.assertEqual(centre["contract_expiry"], [])
 		self.assertEqual(centre["documents"], [])
+
+
+# --------------------------------------------------------------------------- #
+# A controller must never GRANT permission
+# --------------------------------------------------------------------------- #
+class TestEmployeeDocumentPermissionStack(UXFixture):
+	"""Regression for an unauthenticated data leak.
+
+	IsoftEmployeeDocument defined ``has_permission()``, which OVERRIDES
+	``Document.has_permission`` — the method ``check_permission()`` and ``save()`` both
+	call. The whole Frappe permission stack (roles, DocPerms, the registered hook) was
+	therefore skipped for this DocType, and the override returned True for every
+	non-confidential document.
+
+	Reproduced over HTTPS before the fix: GET and PUT on
+	``/api/resource/Isoft Employee Document/<name>`` returned 200 for a user with no
+	roles AND for an unauthenticated Guest, disclosing an employee's national ID and
+	accepting writes to it. The list view stayed correctly protected throughout, which is
+	what made it easy to miss.
+	"""
+
+	def _doc_type(self, confidential=False):
+		name = PREFIX + (" DocType Sec Conf" if confidential else " DocType Sec")
+		if not frappe.db.exists("Isoft Document Type", name):
+			frappe.get_doc({
+				"doctype": "Isoft Document Type", "document_type": name,
+				"is_confidential": 1 if confidential else 0,
+			}).insert(ignore_permissions=True)
+			self._created.append(("Isoft Document Type", name))
+		return name
+
+	def _document(self, employee=None, confidential=False):
+		doc = frappe.get_doc({
+			"doctype": "Isoft Employee Document",
+			"employee": employee or self.employee.name,
+			"document_type": self._doc_type(confidential=confidential),
+			"document_number": "REGRESSION-1",
+			"issue_date": nowdate(),
+		}).insert(ignore_permissions=True)
+		self._created.append(("Isoft Employee Document", doc.name))
+		return doc
+
+	# -- the shape of the bug ------------------------------------------------- #
+	def test_the_controller_does_not_shadow_document_has_permission(self):
+		from isoft_angola_hr.isoft_angola_hr.doctype.isoft_employee_document import (
+			isoft_employee_document as mod,
+		)
+		self.assertNotIn(
+			"has_permission", vars(mod.IsoftEmployeeDocument),
+			"defining has_permission on the controller replaces Frappe's entire "
+			"permission stack for this DocType — restrict through the registered hook")
+
+	def test_a_user_with_no_roles_cannot_read_or_write_a_document(self):
+		doc = self._document()
+		email = "noroles." + PREFIX.lower().replace(" ", "") + "@example.invalid"
+		if not frappe.db.exists("User", email):
+			u = frappe.get_doc({"doctype": "User", "email": email,
+			                    "first_name": PREFIX + " NoRoles",
+			                    "send_welcome_email": 0}).insert(ignore_permissions=True)
+			self._created.append(("User", u.name))
+		frappe.set_user(email)
+		try:
+			self.assertFalse(frappe.has_permission("Isoft Employee Document", "read", doc=doc.name))
+			fresh = frappe.get_doc("Isoft Employee Document", doc.name)
+			with self.assertRaises(frappe.PermissionError):
+				fresh.check_permission("read")
+			with self.assertRaises(Exception):
+				fresh.document_number = "HACKED"
+				fresh.save()
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_guest_cannot_read_a_document(self):
+		doc = self._document()
+		frappe.set_user("Guest")
+		try:
+			self.assertFalse(
+				frappe.has_permission("Isoft Employee Document", "read", doc=doc.name))
+			with self.assertRaises(frappe.PermissionError):
+				frappe.get_doc("Isoft Employee Document", doc.name).check_permission("read")
+		finally:
+			frappe.set_user("Administrator")
+
+	# -- and the rules it was supposed to enforce still hold ------------------ #
+	def test_hr_staff_can_still_read_an_ordinary_document(self):
+		doc = self._document()
+		self.assertTrue(doc_permissions.employee_document_permission(
+			doc, "read", self.users["hruser"]))
+
+	def test_a_confidential_document_stays_with_hr_managers(self):
+		doc = self._document(confidential=True)
+		self.assertTrue(cint(doc.confidential), "the fixture type must be confidential")
+		self.assertFalse(
+			doc_permissions.employee_document_permission(doc, "read", self.users["employee_only"]),
+			"confidentiality must hold against ordinary staff")
+
+	def test_a_confidential_document_is_hidden_from_its_own_subject(self):
+		doc = self._document(confidential=True)
+		frappe.db.set_value("Employee", self.employee.name, "user_id", self.employee_user)
+		self.addCleanup(
+			lambda: frappe.db.set_value("Employee", self.employee.name, "user_id", None))
+		self.assertFalse(
+			doc_permissions.employee_document_permission(doc, "read", self.employee_user))
+
+
+# --------------------------------------------------------------------------- #
+# A role-restricted Desk Page does not protect the endpoint behind it
+# --------------------------------------------------------------------------- #
+class TestPageEndpointsGuardThemselves(UXFixture):
+	"""Regression for an unauthorised disclosure of aggregate payroll.
+
+	``angola_hr_dashboard.get_dashboard_data`` is the Angola HR Dashboard's data source.
+	The Page JSON restricts the page to the six HR/payroll roles, and that was the only
+	thing standing in front of it — the whitelisted endpoint itself carried no check. A
+	Page role list governs who may OPEN the page; it does nothing about a direct call to
+	``/api/method/...get_dashboard_data``.
+
+	Confirmed over HTTPS before the fix: an authenticated user holding NO roles received
+	200 with the active headcount, the salary-profile count, the draft and submitted slip
+	counts and ``net_paid_this_month`` — the company's total net payroll for the month.
+
+	Every peer endpoint (``api.get_overview``, ``hr_api.hr_dashboard``) already guarded
+	itself with an action from ``permissions.ACTION_ROLES``; this one was missed because
+	it lives in a Page controller rather than in the app's API modules.
+	"""
+
+	@property
+	def _endpoint(self):
+		from isoft_angola_hr.isoft_angola_hr.page.angola_hr_dashboard import (
+			angola_hr_dashboard as dash,
+		)
+		return dash
+
+	def test_a_user_with_no_roles_is_refused(self):
+		email = "nodash." + PREFIX.lower().replace(" ", "") + "@example.invalid"
+		if not frappe.db.exists("User", email):
+			u = frappe.get_doc({"doctype": "User", "email": email,
+			                    "first_name": PREFIX + " NoDash",
+			                    "send_welcome_email": 0}).insert(ignore_permissions=True)
+			self._created.append(("User", u.name))
+		frappe.set_user(email)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				self._endpoint.get_dashboard_data()
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_an_ordinary_employee_is_refused(self):
+		frappe.set_user(self.stranger_user)
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				self._endpoint.get_dashboard_data()
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_guest_is_refused(self):
+		frappe.set_user("Guest")
+		try:
+			with self.assertRaises(frappe.PermissionError):
+				self._endpoint.get_dashboard_data()
+		finally:
+			frappe.set_user("Administrator")
+
+	def test_hr_staff_still_get_the_dashboard(self):
+		frappe.set_user(self.users["hruser"])
+		try:
+			data = self._endpoint.get_dashboard_data()
+		finally:
+			frappe.set_user("Administrator")
+		# the figures the page needs are all still there
+		for key in ("active_employees", "salary_profiles", "draft_slips",
+		            "submitted_slips", "net_paid_this_month", "currency"):
+			self.assertIn(key, data)
+
+	def test_the_endpoint_still_names_an_action_from_the_capability_table(self):
+		"""The guard must be a capability check, not an ad-hoc role string, so that
+		segregation of duties stays decided by ACTION_ROLES alone."""
+		import inspect
+
+		source = inspect.getsource(self._endpoint.get_dashboard_data)
+		self.assertIn("perms.require(", source,
+		              "the endpoint must authorise through services.permissions")
+		self.assertNotIn('"HR Manager"', source,
+		                 "hard-coding a role here would bypass the capability table")
+
+	def test_company_scope_is_enforced_when_a_company_is_named(self):
+		"""A caller restricted to one company must not read another company's totals by
+		passing its name — the same rule every other company-aware endpoint applies."""
+		import inspect
+
+		source = inspect.getsource(self._endpoint.get_dashboard_data)
+		self.assertIn("require_company", source)
+
+
+# --------------------------------------------------------------------------- #
+# State-changing endpoints must not be reachable by a cross-site GET
+# --------------------------------------------------------------------------- #
+class TestMutatingEndpointsRefuseGet(UXFixture):
+	"""Regression for a cross-site request forgery vector.
+
+	Frappe validates the CSRF token for POST, PUT and DELETE only — a GET is exempt
+	(``auth.HTTPRequest.validate_csrf_token``). Frappe also discards a GET request's
+	writes, because ``app.after_request`` commits only for POST/PUT. Together those two
+	facts make an ordinary mutating endpoint harmless over GET.
+
+	They stop being harmless the moment an endpoint calls ``frappe.db.commit()``
+	itself: the explicit commit lands before the framework's rollback, so the change
+	sticks. Thirty-three endpoints in ``api.py`` do exactly that — including
+	``delete_salary_slip``, ``delete_payroll_entry``, ``cancel_settlement`` and
+	``update_employee``.
+
+	Confirmed over HTTPS before the fix: a plain GET carrying no CSRF token, issued on a
+	logged-in HR Manager's session, created a record that survived the request. Any page
+	an HR or payroll user could be induced to open — ``<img src="…/api/method/…">`` is
+	enough — could therefore drive a destructive payroll operation with their authority.
+
+	The fix restricts those endpoints to POST. The Desk app calls every one of them
+	through ``frappe.call``, which is POST with the CSRF token by default, so the UI is
+	unaffected.
+	"""
+
+	#: endpoints that commit their own transaction and therefore must refuse GET
+	COMMITTING = (
+		"mark_attendance", "update_attendance", "create_occurrence", "justify_occurrence",
+		"set_occurrence_status", "delete_occurrence", "save_absence_reason",
+		"delete_absence_reason", "save_leave_type", "delete_leave_type",
+		"bulk_allocate_leave", "create_leave", "cancel_leave", "delete_leave",
+		"create_leave_allocation", "delete_leave_allocation", "bulk_mark_attendance",
+		"save_salary_profile", "save_preview_columns", "cancel_salary_slip",
+		"delete_salary_slip", "cancel_payroll_entry", "delete_payroll_entry",
+		"create_settlement", "submit_settlement", "cancel_settlement", "delete_settlement",
+		"save_settings", "create_employee", "update_employee", "create_holiday_list",
+		"add_holiday", "save_shift_type",
+	)
+
+	def test_every_committing_endpoint_is_restricted_to_post(self):
+		from isoft_angola_hr.isoft_angola_hr import api
+
+		allowed = frappe.allowed_http_methods_for_whitelisted_func
+		missing = []
+		for name in self.COMMITTING:
+			fn = getattr(api, name, None)
+			self.assertIsNotNone(fn, "api.{0} no longer exists".format(name))
+			methods = allowed.get(fn)
+			if not methods or "GET" in methods:
+				missing.append(name)
+		self.assertEqual(
+			[], missing,
+			"these endpoints commit their own transaction and still accept GET, so a "
+			"cross-site request can drive them with a logged-in user's authority: "
+			+ ", ".join(missing))
+
+	def test_no_new_endpoint_commits_its_own_transaction_while_allowing_get(self):
+		"""The rule, not just today's list — a new committing endpoint must declare POST."""
+		import ast
+		import inspect
+
+		from isoft_angola_hr.isoft_angola_hr import api
+
+		source = inspect.getsource(api)
+		tree = ast.parse(source)
+		allowed = frappe.allowed_http_methods_for_whitelisted_func
+		offenders = []
+		for node in ast.walk(tree):
+			if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+				continue
+			if not any("whitelist" in ast.dump(d) for d in node.decorator_list):
+				continue
+			body = ast.get_source_segment(source, node) or ""
+			if "db.commit()" not in body:
+				continue
+			fn = getattr(api, node.name, None)
+			if fn is None:
+				continue
+			methods = allowed.get(fn)
+			if not methods or "GET" in methods:
+				offenders.append(node.name)
+		self.assertEqual(
+			[], offenders,
+			"a whitelisted endpoint that calls frappe.db.commit() persists its writes "
+			"even on a GET, which Frappe exempts from CSRF validation. Declare "
+			'@frappe.whitelist(methods=["POST"]) on: ' + ", ".join(offenders))
+
+	def test_read_endpoints_are_left_alone(self):
+		"""The restriction is aimed at writes; read endpoints must stay GET-able so
+		nothing in the UI or an integration breaks."""
+		from isoft_angola_hr.isoft_angola_hr import api
+
+		allowed = frappe.allowed_http_methods_for_whitelisted_func
+		for name in ("get_overview", "payroll_voucher", "payroll_period_for_month"):
+			fn = getattr(api, name, None)
+			self.assertIsNotNone(fn)
+			self.assertIn("GET", allowed.get(fn, []),
+			              "{0} is a read endpoint and must remain GET-able".format(name))
+
+
+# --------------------------------------------------------------------------- #
+# A denied screen must say so, not spin for ever
+# --------------------------------------------------------------------------- #
+class TestDeniedScreenTellsTheUser(UXFixture):
+	"""Regression for a screen that never resolved.
+
+	``render()`` writes a "Loading…" placeholder into ``.ahr-content`` and then hands
+	over to ``view_<screen>``. Those views are written as ``this.call(…).then(render)``
+	— 140 call sites against 52 ``.catch()`` — so when the call was refused the
+	placeholder simply stayed. Frappe still raised its own dialog, and
+	``permissions.require`` makes that dialog a good one (it names the action and every
+	role that holds it), but once it was dismissed the user was left on a spinner that
+	would never finish.
+
+	Confirmed in Chromium before the fix: an HR User opening "IRT / INSS Declarations"
+	(``report.statutory``, which HR User does not hold) was left with ``.ahr-content``
+	reading exactly "Loading…" and a spinner still in the DOM.
+
+	Fixed centrally in ``call()`` rather than by adding a catch to thirty-odd views: the
+	placeholder is written in one place, so it is cleared in one place. The promise is
+	still rejected, so the views that DO handle rejection are unaffected.
+	"""
+
+	@property
+	def _dashboard_js(self):
+		import os
+
+		import isoft_angola_hr
+
+		path = os.path.join(
+			os.path.dirname(isoft_angola_hr.__file__), "isoft_angola_hr", "page",
+			"angola_hr_dashboard", "angola_hr_dashboard.js")
+		with open(path, encoding="utf-8") as fh:
+			return fh.read()
+
+	def test_the_failure_renderer_exists(self):
+		self.assertIn("renderCallFailure", self._dashboard_js)
+
+	def test_the_rejection_path_calls_it(self):
+		"""It must run on the REJECT branch of call(), which is the only place that
+		knows the screen never got its data."""
+		js = self._dashboard_js
+		start = js.index("\tcall(method, args = {}) {")
+		body = js[start:start + 1400]
+		self.assertIn("this.renderCallFailure(err)", body)
+		self.assertIn("reject(err)", body,
+		              "the promise must still reject so existing .catch() handlers work")
+
+	def test_it_only_replaces_the_loading_placeholder(self):
+		"""A view that has already rendered something must never be overwritten."""
+		js = self._dashboard_js
+		start = js.index("renderCallFailure(err) {")
+		body = js[start:start + 1200]
+		self.assertIn("fa-spinner", body,
+		              "the guard must key off the loading placeholder, not fire blindly")
+
+	def test_permission_failures_get_their_own_message(self):
+		js = self._dashboard_js
+		start = js.index("renderCallFailure(err) {")
+		body = js[start:start + 1600]
+		self.assertIn("403", body)
+		self.assertIn("PermissionError", body)
+		self.assertIn("do not have permission", body)

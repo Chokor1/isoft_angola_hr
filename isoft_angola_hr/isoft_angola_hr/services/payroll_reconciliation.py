@@ -99,6 +99,20 @@ def reconcile(entry):
 	debit, credit = _voucher_totals(accrual_vouchers)
 	line("accrual_balance", _("Accrual debits vs credits"), debit, credit)
 
+	# F-04: a run booked under an earlier mapping is reported as drift, not silently as a
+	# shortfall. The vouchers are never rewritten.
+	from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
+	drift = pa.mapping_drift(entry, accrual_vouchers, payment_vouchers, settings) \
+		if accrual_vouchers else {"drifted": False, "posted_to_unmapped_accounts": [],
+		                          "mapped_accounts_without_postings": [], "components_now_unmapped": []}
+	if drift["drifted"]:
+		for l in lines:
+			if not l["reconciled"]:
+				l["note"] = _("{0}The account mapping changed after this payroll was posted "
+				              "(posted to: {1}). Compare against the accounts the vouchers hold.").format(
+					(l["note"] + " ") if l.get("note") else "",
+					", ".join(d["account"] for d in drift["posted_to_unmapped_accounts"]) or "—")
+
 	unposted = [r["employee_name"] or r["employee"] for r in live
 	            if not (r.get("journal_entry") and _submitted(r["journal_entry"]))]
 	unpaid = [r["employee_name"] or r["employee"] for r in live
@@ -117,6 +131,7 @@ def reconcile(entry):
 		"draft_slips": drafts,
 		"accrual_vouchers": accrual_vouchers,
 		"payment_vouchers": payment_vouchers,
+		"mapping_drift": drift,
 	}
 
 
@@ -144,23 +159,23 @@ def assert_ready_to_close(entry):
 
 	if report["draft_slips"]:
 		frappe.throw(
-			_("Não é possível fechar o processamento: {0} recibo(s) continuam em rascunho ({1}). "
-			  "Submeta-os ou cancele-os primeiro.").format(
+			_("The payroll cannot be closed: {0} payslip(s) are still drafts ({1}). Submit "
+			  "or cancel them first.").format(
 				len(report["draft_slips"]), ", ".join(report["draft_slips"][:8])),
 			title=_("Payroll Incomplete"))
 
 	if report["unposted"]:
 		frappe.throw(
-			_("Não é possível fechar o processamento: {0} recibo(s) não foram contabilizados "
-			  "({1}).").format(len(report["unposted"]), ", ".join(report["unposted"][:8])),
+			_("The payroll cannot be closed: {0} payslip(s) have not been posted to the "
+			  "ledger ({1}).").format(len(report["unposted"]), ", ".join(report["unposted"][:8])),
 			title=_("Accounting Incomplete"))
 
 	failed = [l for l in report["lines"] if not l["reconciled"]]
 	if failed:
 		frappe.throw(
-			_("O processamento não reconcilia com a contabilidade e não pode ser fechado:"
+			_("The payroll does not reconcile with the ledger and cannot be closed:"
 			  "<br><br>{0}").format("<br>".join(
-				"• {0}: {1} vs {2} (diferença {3})".format(
+				_("• {0}: {1} vs {2} (difference {3})").format(
 					l["label"], l["expected"], l["actual"], l["difference"]) for l in failed)),
 			title=_("Payroll Does Not Reconcile"))
 

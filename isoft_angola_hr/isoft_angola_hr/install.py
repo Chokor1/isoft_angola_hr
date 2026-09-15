@@ -8,8 +8,12 @@ Adds Angola-specific custom fields onto the reused ERPNext core doctypes
 Idempotent: safe to run on every install and migrate.
 """
 
+import io
+import os
+
 import frappe
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.utils import cint
 
 
 CUSTOM_FIELDS = {
@@ -218,50 +222,22 @@ DEFAULT_IRT_TABLE = "Tabela IRT (Angola)"
 
 PAYSLIP_FORMAT = "Recibo de Vencimento"
 
-PAYSLIP_HTML = """
-<div class="payslip" style="font-family:Arial,sans-serif;">
-  <h2 style="text-align:center;margin-bottom:0;">{{ doc.company or "" }}</h2>
-  <h4 style="text-align:center;margin-top:2px;font-weight:600;">{{ _("Payslip") }}</h4>
-  <table style="width:100%;font-size:12px;margin:10px 0;">
-    <tr><td><b>{{ _("Employee") }}:</b> {{ doc.employee_name }}</td>
-        <td style="text-align:right;"><b>{{ _("Period") }}:</b> {{ doc.start_date }} - {{ doc.end_date }}</td></tr>
-    <tr><td><b>{{ _("ID") }}:</b> {{ doc.employee }}</td>
-        <td style="text-align:right;"><b>{{ _("Paid Days") }}:</b> {{ doc.payment_days }} / {{ doc.total_working_days }}</td></tr>
-  </table>
-  <table style="width:100%;font-size:12px;border-collapse:collapse;">
-    <thead><tr>
-      <th style="border-bottom:2px solid #333;text-align:left;padding:4px;">{{ _("Earnings") }}</th>
-      <th style="border-bottom:2px solid #333;text-align:right;padding:4px;">{{ _("Amount") }}</th>
-      <th style="border-bottom:2px solid #333;text-align:left;padding:4px;">{{ _("Deductions") }}</th>
-      <th style="border-bottom:2px solid #333;text-align:right;padding:4px;">{{ _("Amount") }}</th>
-    </tr></thead>
-    <tbody>
-    {% set earns = doc.earnings | selectattr("do_not_include_in_total", "equalto", 0) | list %}
-    {% set rows = [earns | length, doc.deductions | length] | max %}
-    {% for i in range(rows) %}
-      <tr>
-        <td style="padding:4px;">{{ _(earns[i].salary_component) if i < (earns|length) else "" }}</td>
-        <td style="text-align:right;padding:4px;">{{ frappe.utils.fmt_money(earns[i].amount, currency=doc.currency) if i < (earns|length) else "" }}</td>
-        <td style="padding:4px;">{{ _(doc.deductions[i].salary_component) if i < (doc.deductions|length) else "" }}</td>
-        <td style="text-align:right;padding:4px;">{{ frappe.utils.fmt_money(doc.deductions[i].amount, currency=doc.currency) if i < (doc.deductions|length) else "" }}</td>
-      </tr>
-    {% endfor %}
-      <tr style="border-top:2px solid #333;font-weight:bold;">
-        <td style="padding:4px;">{{ _("Gross Total") }}</td>
-        <td style="text-align:right;padding:4px;">{{ frappe.utils.fmt_money(doc.gross_pay, currency=doc.currency) }}</td>
-        <td style="padding:4px;">{{ _("Total Deductions") }}</td>
-        <td style="text-align:right;padding:4px;">{{ frappe.utils.fmt_money(doc.total_deduction, currency=doc.currency) }}</td>
-      </tr>
-    </tbody>
-  </table>
-  <table style="width:100%;font-size:13px;margin-top:12px;">
-    <tr>
-      <td><b>{{ _("Taxable Income") }}:</b> {{ frappe.utils.fmt_money(doc.taxable_income, currency=doc.currency) }}</td>
-      <td style="text-align:right;font-size:15px;"><b>{{ _("Net Pay") }}: {{ frappe.utils.fmt_money(doc.net_pay, currency=doc.currency) }}</b></td>
-    </tr>
-  </table>
-</div>
-"""
+#: The receipt's template and stylesheet are files, next to the Print Format's own JSON
+#: fixture, so they can be reviewed and diffed like code. ``create_payslip_print_format``
+#: copies them into the Print Format record on every install and migrate.
+PAYSLIP_TEMPLATE_DIR = os.path.join(
+	os.path.dirname(os.path.abspath(__file__)), "print_format", "recibo_de_vencimento")
+PAYSLIP_HTML_FILE = os.path.join(PAYSLIP_TEMPLATE_DIR, "recibo_de_vencimento.html")
+PAYSLIP_CSS_FILE = os.path.join(PAYSLIP_TEMPLATE_DIR, "recibo_de_vencimento.css")
+
+
+def payslip_template():
+	"""(html, css) of the receipt, read from the files above."""
+	with io.open(PAYSLIP_HTML_FILE, encoding="utf-8") as f:
+		html = f.read()
+	with io.open(PAYSLIP_CSS_FILE, encoding="utf-8") as f:
+		css = f.read()
+	return html, css
 
 
 DEFAULT_ABSENCE_REASONS = [
@@ -279,11 +255,14 @@ DEFAULT_ABSENCE_REASONS = [
 def after_install():
 	ensure_roles()
 	seed_payroll_controls()
+	seed_finance_controls()
 	seed_hr_controls()
 	seed_hr_catalogues()
 	setup_custom_fields()
 	seed_defaults()
 	seed_absence_reasons()
+	grant_finance_read_access()
+	grant_capability_docperms()
 	create_payslip_print_format()
 
 
@@ -314,6 +293,7 @@ HR_CONTROL_DEFAULTS = {
 	"require_separate_contract_approval": 1,
 	"require_separate_salary_change_approval": 1,
 	"require_separate_advance_approval": 1,
+	"require_separate_settlement_approval": 1,
 	"contract_expiry_thresholds": "90,60,30,15,7",
 	"document_expiry_thresholds": "90,60,30,15,7",
 	"probation_review_window_days": 30,
@@ -335,6 +315,29 @@ def seed_payroll_controls():
 		settings.set(field, value)
 	settings.save(ignore_permissions=True)
 	frappe.db.set_default(_CONTROLS_SEEDED, "1")
+	frappe.db.commit()
+
+
+#: The HR / Finance boundary (audit finding F-03). Self-approval off, both Finance rules
+#: on. Seeded once, like the other controls: syncing the DocType writes every new Check
+#: of a Single as 0, and for these three fields 0 would mean "HR may post and pay".
+FINANCE_CONTROL_DEFAULTS = {
+	"allow_hr_self_approval": 0,
+	"payroll_posting_requires_finance": 1,
+	"payroll_payment_requires_finance": 1,
+}
+_FINANCE_CONTROLS_SEEDED = "isoft_angola_hr:finance_controls_seeded"
+
+
+def seed_finance_controls():
+	"""Give the F-03 switches their intended value the first time a site sees them."""
+	if frappe.db.get_default(_FINANCE_CONTROLS_SEEDED):
+		return
+	settings = frappe.get_single("Isoft HR Settings")
+	for field, value in FINANCE_CONTROL_DEFAULTS.items():
+		settings.set(field, value)
+	settings.save(ignore_permissions=True)
+	frappe.db.set_default(_FINANCE_CONTROLS_SEEDED, "1")
 	frappe.db.commit()
 
 
@@ -420,6 +423,146 @@ def ensure_roles():
 	frappe.db.commit()
 
 
+#: Roles that need READ on Account, and why. Nothing here is ever granted write.
+_ACCOUNT_READERS = (
+	# Posts payroll and disburses advances. ERPNext's Journal Entry.validate() calls
+	# get_balance_on(), which reads the Account record directly, and that read is not
+	# covered by the voucher's own ignore_permissions.
+	"Payroll Finance Approver",
+	# Holds SETTINGS_WRITE (permissions.ACTION_ROLES), and it is the ONLY role that does.
+	# The settings it owns are the payroll account mappings — payroll_payable_account,
+	# salary_payment_account and the per-component accounts — every one of them an Account
+	# Link field. Without read, frappe.client.validate_link and search_link both return
+	# 403, so the one role allowed to map payroll to the chart of accounts could not
+	# search for an account or save a mapping it had typed.
+	"HR Manager",
+)
+
+
+def grant_finance_read_access():
+	"""Give the roles that need it READ on Account — and only read.
+
+	Each role in ``_ACCOUNT_READERS`` carries a duty the app assigned it that cannot be
+	discharged without resolving an Account. Neither can open Journal Entry or Payment
+	Entry, so neither can post to the ledger except through the payroll flow that
+	authorised it.
+
+	Deliberately NOT granted: Journal Entry / Payment Entry create or submit, and any
+	write, create or delete on Account.
+	"""
+	from frappe.permissions import add_permission, update_permission_property
+
+	for role in _ACCOUNT_READERS:
+		if not frappe.db.exists("Role", role):
+			continue
+		if frappe.db.exists("Custom DocPerm", {"parent": "Account", "role": role}):
+			continue
+		add_permission("Account", role, 0)
+		for prop in ("write", "create", "delete", "submit", "cancel", "amend"):
+			update_permission_property("Account", role, 0, prop, 0)
+		update_permission_property("Account", role, 0, "read", 1)
+		update_permission_property("Account", role, 0, "report", 1)
+	frappe.db.commit()
+
+
+#: A capability the app grants is only half a permission. ``perms.require(...)`` decides
+#: whether the APPLICATION agrees; the write that follows still goes through Frappe's
+#: DocPerms, and when the two disagree the user is shown a bare 403 with no message — the
+#: button is offered, the guard allows it, and the framework refuses. Every entry below was
+#: found that way: a role that holds the capability, performing the action the capability
+#: names, being refused by the framework.
+#:
+#: Format: (doctype, role, {permission: value}, why).
+_CAPABILITY_DOCPERMS = (
+	# EMPLOYEE_WRITE is HR User + HR Manager. The console's "Edit Details" dialog carries a
+	# Designation Link, and its control resolves the link before the form will save, so
+	# without read the one dialog that edits an employee cannot be saved at all.
+	("Designation", "HR Manager", {"read": 1}, "Employee edit dialog resolves this Link"),
+
+	# RECRUITMENT_OPERATE is HR User + HR Manager, but only HR User carries the DocPerms,
+	# so every recruitment entry point (create_job_opening / _applicant / _offer) refused
+	# the manager who is supposed to run recruitment.
+	("Job Opening", "HR Manager", {"read": 1, "write": 1, "create": 1},
+	 "recruitment.operate"),
+	("Job Applicant", "HR Manager", {"read": 1, "write": 1, "create": 1},
+	 "recruitment.operate"),
+	# create_job_offer refused the manager with a bare "does not have access to this
+	# document": Job Offer carried HR User alone, so the recruitment flow stopped one step
+	# short of the offer it exists to produce.
+	("Job Offer", "HR Manager", {"read": 1, "write": 1, "create": 1}, "recruitment.operate"),
+
+	# PERFORMANCE_OPERATE lists HR Manager, but the two ERPNext doctypes the cycle is
+	# built from carried HR User alone. A cycle needs a template, so the manager could not
+	# create the template, could not create the cycle, and the whole performance process
+	# was unreachable for the role that owns it.
+	("Appraisal Template", "HR Manager", {"read": 1, "write": 1, "create": 1},
+	 "performance.operate"),
+	("Appraisal", "HR Manager", {"read": 1, "write": 1, "create": 1}, "performance.operate"),
+
+	# ATTENDANCE_WRITE is HR User + Payroll Officer + HR Manager. Attendance is submittable
+	# and mark_attendance submits it, so the officer needs submit and cancel as well as
+	# create — otherwise the officer's own attendance screen cannot record a day.
+	("Attendance", "Payroll Officer",
+	 {"read": 1, "write": 1, "create": 1, "submit": 1, "cancel": 1}, "attendance.write"),
+
+	# PAYROLL_PREPARE is Payroll Officer + HR Manager: preparing a final settlement is the
+	# officer's job, and creating one was refused. Deliberately NOT granted: submit, cancel
+	# or delete — approving and reversing a settlement stay with HR Manager.
+	("Isoft Final Settlement", "Payroll Officer", {"read": 1, "write": 1, "create": 1},
+	 "payroll.prepare"),
+)
+
+#: Fields at permlevel > 0 are governed separately: Frappe silently DISCARDS a change to
+#: such a field when the user cannot write that level, so the save appears to succeed and
+#: the value simply does not move. Leave Application.status is permlevel 1 here, writable
+#: by HR User and Leave Approver but not by HR Manager — and LEAVE_APPROVE is HR Manager
+#: ALONE. The only role permitted to approve leave could not: the status reverted to Open
+#: and the submit then failed with "Only Leave Applications with status 'Approved' and
+#: 'Rejected' can be submitted", which names neither the real cause nor the field.
+_CAPABILITY_PERMLEVELS = (
+	("Leave Application", "HR Manager", 1, {"read": 1, "write": 1}, "leave.approve"),
+)
+
+
+def grant_capability_docperms():
+	"""Give each role the DocPerms its capabilities already imply — and nothing more.
+
+	Idempotent, and additive only: an existing permission is never lowered, so an
+	administrator who has deliberately widened something is not overruled by a migrate.
+	"""
+	from frappe.permissions import add_permission, update_permission_property
+
+	for doctype, role, props, _why in _CAPABILITY_DOCPERMS:
+		if not (frappe.db.exists("DocType", doctype) and frappe.db.exists("Role", role)):
+			continue
+		add_permission(doctype, role, 0)
+		for prop, value in props.items():
+			if not _has_perm(doctype, role, 0, prop):
+				update_permission_property(doctype, role, 0, prop, value)
+
+	for doctype, role, level, props, _why in _CAPABILITY_PERMLEVELS:
+		if not (frappe.db.exists("DocType", doctype) and frappe.db.exists("Role", role)):
+			continue
+		add_permission(doctype, role, level)
+		for prop, value in props.items():
+			if not _has_perm(doctype, role, level, prop):
+				update_permission_property(doctype, role, level, prop, value)
+	frappe.db.commit()
+
+
+def _has_perm(doctype, role, permlevel, prop):
+	"""True when the effective DocPerm already allows ``prop``.
+
+	Custom DocPerm rows REPLACE the standard ones for a doctype rather than adding to them,
+	so the effective table has to be chosen the same way Frappe chooses it.
+	"""
+	table = "Custom DocPerm" if frappe.db.count("Custom DocPerm", {"parent": doctype}) \
+		else "DocPerm"
+	rows = frappe.get_all(table, filters={"parent": doctype, "role": role,
+	                                      "permlevel": permlevel}, fields=[prop])
+	return any(cint(r.get(prop)) for r in rows)
+
+
 def seed_absence_reasons():
 	for reason in DEFAULT_ABSENCE_REASONS:
 		if not frappe.db.exists("Isoft Absence Reason", reason):
@@ -500,39 +643,36 @@ def seed_defaults():
 
 
 def create_payslip_print_format():
+	"""Install or refresh the "Recibo de Vencimento" Print Format from its template files.
+
+	Runs on every install and migrate, so the record on the site always carries the
+	template and stylesheet shipped with the app. The format is deliberately
+	standard="No": Print Format.validate() refuses to save a standard format outside
+	developer_mode, which would make it read-only on a production site.
+	"""
+	html, css = payslip_template()
+	values = {
+		"doc_type": "Isoft Salary Slip",
+		"module": "Isoft Angola HR",
+		"print_format_type": "Jinja",
+		"custom_format": 1,
+		"standard": "No",
+		"disabled": 0,
+		"html": html,
+		"css": css,
+	}
 	if frappe.db.exists("Print Format", PAYSLIP_FORMAT):
 		doc = frappe.get_doc("Print Format", PAYSLIP_FORMAT)
-		doc.html = PAYSLIP_HTML
-		doc.print_format_type = "Jinja"
-		doc.custom_format = 1
-		# a copy created while developer_mode was on is flagged standard="Yes",
-		# which Print Format.validate() refuses to update outside developer_mode
-		doc.standard = "No"
+		doc.update(values)
 		doc.flags.ignore_validate_update_after_submit = True
 		try:
 			doc.save(ignore_permissions=True)
 		except frappe.ValidationError:
-			frappe.db.set_value(
-				"Print Format",
-				PAYSLIP_FORMAT,
-				{
-					"standard": "No",
-					"custom_format": 1,
-					"print_format_type": "Jinja",
-					"html": PAYSLIP_HTML,
-				},
-				update_modified=False,
-			)
+			# a copy created while developer_mode was on is flagged standard="Yes",
+			# which Print Format.validate() refuses to update outside developer_mode
+			frappe.db.set_value("Print Format", PAYSLIP_FORMAT, values, update_modified=False)
 			frappe.clear_cache(doctype="Isoft Salary Slip")
 	else:
-		frappe.get_doc({
-			"doctype": "Print Format",
-			"name": PAYSLIP_FORMAT,
-			"doc_type": "Isoft Salary Slip",
-			"module": "Isoft Angola HR",
-			"print_format_type": "Jinja",
-			"custom_format": 1,
-			"standard": "No",
-			"html": PAYSLIP_HTML,
-		}).insert(ignore_permissions=True)
+		doc = frappe.get_doc(dict(values, doctype="Print Format", name=PAYSLIP_FORMAT))
+		doc.insert(ignore_permissions=True)
 	frappe.db.commit()

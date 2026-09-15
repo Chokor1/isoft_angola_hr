@@ -155,22 +155,22 @@ def my_payslip(name):
 	# The statutory trace, phrased for a person rather than for an auditor.
 	slip["explanation"] = {
 		"social_security": {
-			"label": _("Segurança Social"),
-			"base": _("Base de incidência: {0}").format(flt(slip.ss_base, 2)),
-			"rate": _("Taxa: {0}%").format(flt(slip.ss_employee_rate)),
-			"amount": _("Valor descontado: {0}").format(flt(slip.ss_employee_amount, 2)),
+			"label": _("Social Security"),
+			"base": _("Contribution base: {0}").format(flt(slip.ss_base, 2)),
+			"rate": _("Rate: {0}%").format(flt(slip.ss_employee_rate)),
+			"amount": _("Amount deducted: {0}").format(flt(slip.ss_employee_amount, 2)),
 		},
 		"irt": {
 			"label": _("IRT"),
-			"taxable": _("Rendimento tributável: {0}").format(flt(slip.taxable_income, 2)),
-			"bracket": _("Escalão: {0} – {1}").format(
+			"taxable": _("Taxable income: {0}").format(flt(slip.taxable_income, 2)),
+			"bracket": _("Bracket: {0} – {1}").format(
 				flt(slip.irt_bracket_from, 2),
-				flt(slip.irt_bracket_to, 2) if flt(slip.irt_bracket_to) else _("acima")),
-			"rate": _("Taxa: {0}%").format(flt(slip.irt_rate)),
-			"fixed": _("Parcela fixa: {0}").format(flt(slip.irt_parcela_fixa, 2)),
-			"amount": _("Valor descontado: {0}").format(flt(slip.irt_amount, 2)),
+				flt(slip.irt_bracket_to, 2) if flt(slip.irt_bracket_to) else _("and above")),
+			"rate": _("Rate: {0}%").format(flt(slip.irt_rate)),
+			"fixed": _("Fixed portion: {0}").format(flt(slip.irt_parcela_fixa, 2)),
+			"amount": _("Amount deducted: {0}").format(flt(slip.irt_amount, 2)),
 		},
-		"days": _("Dias pagos: {0} de {1}").format(flt(slip.payment_days),
+		"days": _("Paid days: {0} of {1}").format(flt(slip.payment_days),
 		                                           flt(slip.total_working_days)),
 	}
 	return slip

@@ -18,7 +18,7 @@ DocType class — see shift_type_override.py.
 erpnext/hr/doctype/shift_assignment/shift_assignment.py and shift_type.py are
 byte-identical to upstream v13.49.12 again.
 
-get_employee_shift() below is upstream's function with one block added, marked
+get_employee_shift() below is upstream's function with two blocks added, marked
 inline. It is a copy rather than a wrapper because the weekday rule has to apply
 *before* the next-shift search inside the function, and there is no seam there.
 That copy is the maintenance cost of keeping core clean: re-check it against
@@ -124,9 +124,21 @@ def get_employee_shift(
 	if not shift_type_name and consider_default_shift:
 		shift_type_name = default_shift
 	if shift_type_name:
-		holiday_list_name = frappe.get_cached_value("Shift Type", shift_type_name, "holiday_list")
-		if not holiday_list_name:
-			holiday_list_name = get_holiday_list_for_employee(employee, False)
+		# --- this app's second addition ---
+		# Upstream resolves the holiday list here itself: Shift Type's list, else the
+		# employee's. That is the same precedence payroll now uses, but it was a second
+		# copy of it, and the two drifted — payroll was reading the employee's field
+		# only. One function answers it for the whole application.
+		# `is_holiday` was used here without ever being imported, so this branch raised
+		# NameError for every employee who HAS a shift — upstream's holiday skip has
+		# never actually run on this site. Fixed here because reconciling the resolution
+		# is pointless while the code that consumes it cannot execute.
+		from erpnext.hr.doctype.holiday_list.holiday_list import is_holiday
+
+		from isoft_angola_hr.isoft_angola_hr.services import work_calendar
+
+		holiday_list_name, _source = work_calendar.resolve_holiday_list(
+			employee, for_date, shift=shift_type_name)
 		if holiday_list_name and is_holiday(holiday_list_name, for_date):
 			shift_type_name = None
 
