@@ -11,96 +11,180 @@ body.ahr-fullscreen .layout-main-section-wrapper { margin-top: 0 !important; }
 body.ahr-fullscreen .page-container { padding-top: 0 !important; }
 body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 
-/* ---------------- Theme (insights-style blue) ----------------
-   Defined at :root so dialog content (rendered outside .ahr-shell) resolves them too. */
+/* ---------------- Theme: Invenza slate + one blue accent ----------------
+   Defined at :root so dialog content (rendered outside the shell) resolves them too.
+   Only these two blocks differ between light and dark; everything below reads
+   the tokens, so the palette is changed in one place. */
 :root {
 	--ahr-primary: #2563eb;
-	--ahr-primary-2: #1e40af;
+	--ahr-primary-2: #1d4ed8;
 	--ahr-accent: #3b82f6;
-	--ahr-bg: #f6f8fb;
+	--ahr-ink-accent: #2563eb;
+	--ahr-page: #f1f5f9;
+	--ahr-side: #ffffff;
+	--ahr-bg: #f1f5f9;
+	--ahr-bg-2: #f8fafc;
 	--ahr-card: #ffffff;
-	--ahr-border: #e6eaf0;
-	--ahr-border-strong: #d8deea;
-	--ahr-ink: #1f2937;
-	--ahr-muted: #6b7280;
-	--ahr-tint: rgba(37, 99, 235, .05);
-	--ahr-tint-2: rgba(37, 99, 235, .10);
-	--ahr-grad: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-	--ahr-sidebar-grad: linear-gradient(180deg, #1e40af 0%, #2563eb 100%);
-	--ahr-shadow: 0 2px 10px rgba(37, 99, 235, .07);
-	--ahr-shadow-lg: 0 10px 26px rgba(37, 99, 235, .16);
+	--ahr-border: #e2e8f0;
+	--ahr-border-strong: #cbd5e1;
+	--ahr-ink: #0f172a;
+	--ahr-ink-2: #334155;
+	--ahr-muted: #64748b;
+	--ahr-faint: #94a3b8;
+	--ahr-tint: #f8fafc;
+	--ahr-tint-2: #eff6ff;
+	/* Kept as variable names because the rest of the sheet references them; both
+	   are flat colours now — nothing in this console is a gradient any more. */
+	--ahr-grad: #2563eb;
+	--ahr-sidebar-grad: #ffffff;
+	--ahr-shadow: none;
+	--ahr-shadow-lg: 0 12px 28px rgba(15, 23, 42, .14);
 }
 /* Follow Frappe's dark theme (set on <html data-theme="dark">) */
 [data-theme="dark"] {
-	--ahr-bg: #16181d;
-	--ahr-card: #21242c;
-	--ahr-border: #32373f;
-	--ahr-border-strong: #3c424c;
-	--ahr-ink: #e6e8ec;
-	--ahr-muted: #9aa1ac;
-	--ahr-tint: rgba(59, 130, 246, .10);
-	--ahr-tint-2: rgba(59, 130, 246, .18);
-	--ahr-grad: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-	--ahr-sidebar-grad: linear-gradient(180deg, #1e3a8a 0%, #1e40af 100%);
-	--ahr-shadow: 0 2px 10px rgba(0, 0, 0, .35);
-	--ahr-shadow-lg: 0 12px 26px rgba(0, 0, 0, .5);
+	--ahr-primary: #3b82f6;
+	--ahr-primary-2: #2563eb;
+	--ahr-accent: #60a5fa;
+	--ahr-ink-accent: #60a5fa;
+	--ahr-page: #0b1220;
+	--ahr-side: #131c2e;
+	--ahr-bg: #0f172a;
+	--ahr-bg-2: #182236;
+	--ahr-card: #1e293b;
+	--ahr-border: #334155;
+	--ahr-border-strong: #475569;
+	--ahr-ink: #f1f5f9;
+	--ahr-ink-2: #cbd5e1;
+	--ahr-muted: #94a3b8;
+	--ahr-faint: #64748b;
+	--ahr-tint: #263244;
+	--ahr-tint-2: rgba(96, 165, 250, .16);
+	--ahr-grad: #3b82f6;
+	--ahr-sidebar-grad: #131c2e;
+	--ahr-shadow: none;
+	--ahr-shadow-lg: 0 12px 28px rgba(0, 0, 0, .5);
 }
 
-.ahr-shell { display: block; padding-top: 6px; min-height: calc(100vh - 60px); }
+/* ================= Shell: fixed sidebar + content =================
+ * The frame is padded by the sidebar's width and the sidebar itself is taken
+ * out of flow, so .ahr-shell still starts where it always did — the layout
+ * machinery further down measures that, and none of it had to change. */
+/* Collapsing is INSTANT, not animated. An animated width resizes the chart
+   containers over ~10 frames, and frappe-charts redraws on every one of them:
+   its ResizeObserver then removes nodes a previous draw had already replaced and
+   throws NotFoundError (removeChild). Verified both ways on the Overview board. */
+.ahr-frame { --ahr-sb: 224px; padding-left: var(--ahr-sb); }
+.ahr-frame.ahr-sb-collapsed { --ahr-sb: 62px; }
 
-/* ---------------- Top navbar ---------------- */
-.ahr-bar {
-	display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-	background: var(--ahr-card); border: 1px solid var(--ahr-border); border-top: 3px solid var(--ahr-primary);
-	border-radius: 14px; padding: 10px 14px; margin-bottom: 18px; box-shadow: var(--ahr-shadow);
-	position: sticky; top: 10px; z-index: 30;
+.ahr-sidebar {
+	position: fixed; top: 0; left: 0; bottom: 0; width: var(--ahr-sb); z-index: 1020;
+	display: flex; flex-direction: column;
+	background: var(--ahr-side); border-right: 1px solid var(--ahr-border);
 }
-.ahr-brand { display: flex; align-items: center; gap: 10px; padding-right: 14px; border-right: 1px solid var(--ahr-border); }
+.ahr-side-brand {
+	display: flex; align-items: center; gap: .6rem; flex-shrink: 0;
+	min-height: 58px; padding: .6rem .75rem; border-bottom: 1px solid var(--ahr-border);
+}
 .ahr-brand-logo {
-	width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center;
-	color: #fff; font-size: 16px; background: var(--ahr-grad); box-shadow: 0 4px 10px rgba(37,99,235,.3);
+	width: 34px; height: 34px; flex-shrink: 0; border: 0; border-radius: 9px; cursor: pointer;
+	display: flex; align-items: center; justify-content: center;
+	background: var(--ahr-primary); color: #fff; font-size: 16px;
+	transition: filter .2s, transform .2s;
 }
-.ahr-brand-meta { display: flex; flex-direction: column; line-height: 1.15; }
-.ahr-brand-name { font-weight: 800; font-size: 14px; letter-spacing: .2px; color: var(--ahr-ink); white-space: nowrap; }
-.ahr-brand-tag { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .6px; color: var(--ahr-muted); }
+.ahr-brand-logo:hover { filter: brightness(1.08); transform: scale(1.06); }
+.ahr-brand-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; white-space: nowrap; }
+.ahr-brand-name { font-size: 15px; font-weight: 700; letter-spacing: -.02em; color: var(--ahr-ink); }
+.ahr-brand-tag { font-size: 11px; font-weight: 500; letter-spacing: .03em; text-transform: none; color: var(--ahr-muted); }
 
-.ahr-tabs { display: flex; gap: 6px; flex-wrap: wrap; flex: 1 1 auto; align-items: center; }
-.ahr-tab {
-	display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; white-space: nowrap;
-	padding: 7px 12px; border-radius: 9px; border: 1px solid var(--ahr-border); background: var(--ahr-card);
-	color: var(--ahr-muted); cursor: pointer; transition: all .15s;
+.ahr-nav {
+	flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+	padding: .6rem .5rem; display: flex; flex-direction: column; gap: 2px;
 }
-.ahr-tab i { font-size: 12px; }
-.ahr-tab:hover { color: var(--ahr-primary); border-color: var(--ahr-accent); transform: translateY(-1px); }
-.ahr-tab.active { background: var(--ahr-primary); color: #fff; border-color: var(--ahr-primary); box-shadow: 0 6px 16px rgba(37,99,235,.30); }
-.ahr-tab.active i { color: #fff; }
-.ahr-tab .ahr-caret { font-size: 10px; opacity: .7; transition: transform .2s; }
-.ahr-tab-wrap { position: relative; }
-.ahr-tab-wrap.open .ahr-tab .ahr-caret { transform: rotate(180deg); }
-.ahr-dd-menu {
-	display: none; position: absolute; top: calc(100% + 6px); left: 0; min-width: 190px;
-	background: var(--ahr-card); border: 1px solid var(--ahr-border); border-radius: 11px;
-	box-shadow: var(--ahr-shadow-lg); padding: 6px; z-index: 40;
+.ahr-nav::-webkit-scrollbar { width: 6px; }
+.ahr-nav::-webkit-scrollbar-thumb { background: var(--ahr-border); border-radius: 3px; }
+
+.ahr-nav-link {
+	display: flex; align-items: center; gap: .7rem; width: 100%; flex-shrink: 0;
+	padding: .5rem .6rem; border: 0; border-radius: 9px; background: transparent;
+	color: var(--ahr-ink-2); font-size: 13px; font-weight: 500; text-align: left;
+	white-space: nowrap; cursor: pointer; transition: background .15s, color .15s;
 }
-.ahr-tab-wrap.open .ahr-dd-menu { display: block; }
-.ahr-dd-item { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 8px; font-size: 13px; color: var(--ahr-ink); cursor: pointer; }
-.ahr-dd-item i { width: 16px; text-align: center; color: var(--ahr-muted); }
-.ahr-dd-item:hover { background: var(--ahr-tint); color: var(--ahr-primary); }
-.ahr-dd-item:hover i { color: var(--ahr-primary); }
-.ahr-dd-item.active { background: var(--ahr-tint-2); color: var(--ahr-primary); font-weight: 600; }
+.ahr-nav-link:hover { background: var(--ahr-tint); color: var(--ahr-ink); }
+.ahr-nav-link.active { background: var(--ahr-tint-2); color: var(--ahr-ink-accent); font-weight: 600; }
+.ahr-nav-ico { width: 20px; flex-shrink: 0; text-align: center; font-size: 14px; color: var(--ahr-muted); }
+.ahr-nav-link.active .ahr-nav-ico, .ahr-nav-head.active-group .ahr-nav-ico { color: var(--ahr-ink-accent); }
+.ahr-nav-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ahr-nav-caret { margin-left: auto; font-size: 11px; color: var(--ahr-faint); transition: transform .18s; }
+.ahr-nav-group.open > .ahr-nav-head .ahr-nav-caret { transform: rotate(180deg); }
+.ahr-nav-head.active-group { color: var(--ahr-ink); font-weight: 600; }
+/* Collapsible group. A max-height transition rather than the 0fr→1fr grid trick:
+   the children are direct siblings here, and that trick needs one wrapper child. */
+.ahr-nav-kids { max-height: 0; overflow: hidden; transition: max-height .2s ease; }
+.ahr-nav-group.open > .ahr-nav-kids { max-height: 420px; }
+.ahr-nav-kid { padding-left: 1.7rem; font-size: 12.5px; color: var(--ahr-muted); }
+.ahr-nav-kid .ahr-nav-ico { font-size: 12px; }
+.ahr-nav-kid.active { color: var(--ahr-ink-accent); }
+.ahr-sidebar :focus { outline: none !important; }
+.ahr-sidebar button:focus-visible,
+.ahr-sidebar select:focus-visible { box-shadow: 0 0 0 3px rgba(59, 130, 246, .28) !important; }
 
-.ahr-bar-tools { display: flex; align-items: center; gap: 8px; }
-.ahr-bar-tools .ahr-company { width: auto; min-width: 140px; border-radius: 9px; border: 1px solid var(--ahr-border-strong); }
-.ahr-bar-tools .btn { border-radius: 9px; }
-
-/* Fullscreen / maximized mode */
-.ahr-shell.ahr-maximized {
-	position: fixed; inset: 0; z-index: 1050; overflow: auto;
-	background: var(--ahr-bg); padding: 14px 22px;
+.ahr-side-foot {
+	flex-shrink: 0; padding: .5rem; border-top: 1px solid var(--ahr-border);
+	display: flex; flex-direction: column; gap: .4rem;
 }
-.ahr-shell.ahr-maximized .ahr-bar { top: 0; }
+.ahr-company-wrap {
+	position: relative; display: flex; align-items: center; gap: .5rem; margin: 0;
+	padding: .4rem .6rem; border-radius: 9px; cursor: pointer; font-weight: normal;
+	background: var(--ahr-bg-2); border: 1px solid var(--ahr-border); color: var(--ahr-ink);
+}
+.ahr-company-wrap > i { width: 20px; flex-shrink: 0; text-align: center; color: var(--ahr-muted); }
+.ahr-sidebar select.ahr-company {
+	flex: 1; width: 100%; min-width: 0; height: auto; padding: 0; border: 0; outline: none;
+	background: transparent; color: var(--ahr-ink); font-size: 12.5px; font-weight: 600;
+	box-shadow: none; cursor: pointer; text-overflow: ellipsis;
+}
+.ahr-sidebar select.ahr-company option { color: #0f172a; background: #ffffff; }
+[data-theme="dark"] .ahr-sidebar select.ahr-company option { color: #f1f5f9; background: #0f172a; }
+.ahr-side-tools { display: flex; gap: .3rem; }
+.ahr-side-btn {
+	flex: 1 1 auto; height: 30px; display: flex; align-items: center; justify-content: center;
+	border: 1px solid var(--ahr-border); border-radius: 8px; background: var(--ahr-card);
+	color: var(--ahr-muted); font-size: 12px; cursor: pointer; transition: border-color .15s, color .15s;
+}
+.ahr-side-btn:hover { border-color: var(--ahr-border-strong); color: var(--ahr-ink); }
 
-@media (max-width: 760px) { .ahr-brand-meta { display: none; } }
+/* ---- Collapsed rail: icons only, groups open BESIDE the icon ---- */
+.ahr-frame.ahr-sb-collapsed .ahr-brand-meta,
+.ahr-frame.ahr-sb-collapsed .ahr-nav-label,
+.ahr-frame.ahr-sb-collapsed .ahr-nav-caret { display: none; }
+.ahr-frame.ahr-sb-collapsed .ahr-side-brand,
+.ahr-frame.ahr-sb-collapsed .ahr-nav-link,
+.ahr-frame.ahr-sb-collapsed .ahr-company-wrap { justify-content: center; padding-left: .4rem; padding-right: .4rem; gap: 0; }
+.ahr-frame.ahr-sb-collapsed .ahr-company-wrap > i { width: auto; }
+.ahr-frame.ahr-sb-collapsed .ahr-company { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; }
+.ahr-frame.ahr-sb-collapsed .ahr-side-tools { flex-direction: column; }
+.ahr-frame.ahr-sb-collapsed .ahr-nav-group > .ahr-nav-kids { display: none; max-height: none; }
+.ahr-frame.ahr-sb-collapsed .ahr-nav-group.flyout > .ahr-nav-kids {
+	display: block; position: fixed; left: calc(var(--ahr-sb) + 6px); z-index: 1030;
+	min-width: 214px; padding: 6px; border-radius: 10px;
+	background: var(--ahr-card); border: 1px solid var(--ahr-border); box-shadow: var(--ahr-shadow-lg);
+}
+.ahr-frame.ahr-sb-collapsed .ahr-nav-group.flyout > .ahr-nav-kids .ahr-nav-label { display: block; }
+.ahr-frame.ahr-sb-collapsed .ahr-nav-group.flyout > .ahr-nav-kids .ahr-nav-link {
+	justify-content: flex-start; gap: .7rem; padding-left: .6rem; padding-right: .8rem;
+}
+
+/* ================= Page bar ================= */
+.ahr-shell { display: block; padding: 0 18px 18px; min-height: calc(100vh - 20px); }
+.ahr-bar {
+	display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap;
+	min-height: 58px; margin: 0 -18px 14px; padding: .6rem 18px;
+	background: var(--ahr-side); border: 0; border-bottom: 1px solid var(--ahr-border);
+	border-radius: 0; box-shadow: none; position: sticky; top: 0; z-index: 30;
+}
+.ahr-bar .ahr-pagebar { flex: 1 1 auto; min-width: 0; margin: 0; }
+.ahr-bar-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.ahr-bar-tools .btn { border-radius: 7px; }
 
 /* ---------------- Metric row (§8, §9) ----------------
  * The figure is the point of the card, so it is the strongest thing in it:
@@ -193,9 +277,9 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
  * ===================================================================== */
 
 :root {
-	--ahr-r-lg: 14px;      /* sections */
-	--ahr-r-md: 12px;      /* metrics, callouts, filter bar */
-	--ahr-r-sm: 9px;       /* controls, chips */
+	--ahr-r-lg: 10px;      /* sections */
+	--ahr-r-md: 9px;       /* metrics, callouts, filter bar */
+	--ahr-r-sm: 7px;       /* controls, chips */
 	--ahr-gap-section: 20px;
 }
 
@@ -1237,31 +1321,12 @@ li.collapsed > .ahr-node .ahr-node-toggle i { transform: rotate(-90deg); }
 @media (max-width: 900px) { .ahr-org-branch { margin-bottom: 18px; } }
 
 /* ---- Mobile: give the data the screen ------------------------------------
- * At 390px the navigation wrapped onto six rows and the org header took the
- * rest, so the first employee card sat below the fold on a screen whose whole
- * purpose is the chart. Nothing is removed — the same controls are all there,
- * just laid out to take one line each instead of six. */
+ * The navigation is a 62px rail on a phone (forced in the JS), so the only thing
+ * left to win back is the padding around the content. */
 @media (max-width: 760px) {
-	/* Tabs scroll sideways rather than stacking. One row, swipe to reach the rest. */
-	/* TWO rows, not six: the tools on one, the tabs on the other as a horizontal
-	 * scroller. They must not share a row — a scroller sliding underneath a fixed
-	 * neighbour puts the tabs behind it, and the neighbour then swallows their clicks. */
-	.ahr-bar { gap: 8px; padding: 8px 10px; margin-bottom: 12px; flex-wrap: wrap; }
-	/* The brand is decoration, and on a phone it is decoration that costs a row. */
-	.ahr-brand { display: none; }
-	.ahr-bar-tools { order: 1; flex: 1 1 100%; justify-content: space-between; }
-	.ahr-bar-tools .ahr-company { min-width: 0; flex: 1 1 auto; }
-	.ahr-tabs {
-		order: 2; flex: 1 1 100%;
-		flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;
-		-webkit-overflow-scrolling: touch; scrollbar-width: none;
-		padding-bottom: 2px;
-	}
-	.ahr-tabs::-webkit-scrollbar { display: none; }
-	.ahr-tab { flex: 0 0 auto; }
-	/* The dropdown belongs to a tab inside a horizontal scroller, so it has to escape
-	 * it — otherwise the menu is clipped by the scroller's own overflow. */
-	.ahr-tab-wrap.open .ahr-dd-menu { position: fixed; left: 10px; right: 10px; top: auto; }
+	.ahr-shell { padding: 0 10px 12px; }
+	.ahr-bar { gap: 8px; padding: 8px 10px; margin: 0 -10px 10px; }
+	.ahr-bar-tools { gap: 6px; }
 }
 
 @media (max-width: 900px) {
@@ -1413,4 +1478,36 @@ li.collapsed > .ahr-node .ahr-node-toggle i { transform: rotate(-90deg); }
 
 @media (max-width: 900px) {
 	.fs-breakdown .fs-line-calc { white-space: normal; }
+}
+
+
+/* ===================================================================
+ * SHELL OVERRIDES (last word)
+ *
+ * The layout-mode rules above were written for a shell that owned the whole
+ * page. The shell now sits beside a fixed sidebar, and browser fullscreen no
+ * longer needs a "maximized" overlay — the console already fills the window —
+ * so .ahr-maximized keeps its class (the JS toggles it) but stops repositioning.
+ * =================================================================== */
+.ahr-shell.ahr-maximized {
+	position: static; inset: auto; z-index: auto; background: transparent;
+	padding: 0 18px 18px; overflow: visible;
+}
+.ahr-shell.ahr-maximized > .ahr-bar { top: 0; }
+.ahr-shell.ahr-maximized.ahr-data-screen,
+.ahr-shell.ahr-maximized.ahr-canvas-screen,
+.ahr-shell.ahr-maximized.ahr-board-screen {
+	height: calc(100vh - var(--ahr-shell-top, 0px) - 10px); padding: 0 18px 18px; overflow: hidden;
+}
+.ahr-shell.ahr-maximized.ahr-dashboard-screen { height: auto; overflow: visible; }
+/* The bar spans the content width in every mode, and never floats. */
+.ahr-shell.ahr-dashboard-screen > .ahr-bar,
+.ahr-shell.ahr-board-screen > .ahr-bar,
+.ahr-shell.ahr-data-screen > .ahr-bar,
+.ahr-shell.ahr-canvas-screen > .ahr-bar { top: 0; }
+@media (max-width: 760px) {
+	.ahr-shell.ahr-maximized,
+	.ahr-shell.ahr-maximized.ahr-data-screen,
+	.ahr-shell.ahr-maximized.ahr-canvas-screen,
+	.ahr-shell.ahr-maximized.ahr-board-screen { padding: 0 10px 12px; }
 }

@@ -458,37 +458,78 @@ class AngolaHR {
 	}
 
 	build() {
-		const shell = $(`
-			<div class="ahr-shell">
-				<div class="ahr-bar">
-					<div class="ahr-brand">
-						<span class="ahr-brand-logo"><i class="fa fa-users"></i></span>
+		/* The console wears the Invenza shell: a fixed left sidebar carries the
+		 * navigation, the company and the window controls; the page keeps its own
+		 * slim bar for the screen title and the quick actions. The frame is only
+		 * padded by the sidebar's width, so the layout machinery below (which
+		 * measures where .ahr-shell starts) is untouched by the change. */
+		const frame = $(`
+			<div class="ahr-frame">
+				<aside class="ahr-sidebar">
+					<div class="ahr-side-brand">
+						<button type="button" class="ahr-brand-logo" title="${__("Overview")}"><i class="fa fa-users"></i></button>
 						<span class="ahr-brand-meta">
 							<span class="ahr-brand-name">Angola HR</span>
 							<span class="ahr-brand-tag">${__("HR & Payroll")}</span>
 						</span>
 					</div>
-					<div class="ahr-tabs"></div>
-					<div class="ahr-bar-tools">
-						<div class="ahr-quick-wrap">
-							<button class="btn btn-primary ahr-quick-btn"><i class="fa fa-bolt"></i> <span>${__("New")}</span> <i class="fa fa-caret-down"></i></button>
-							<div class="ahr-quick-menu"></div>
+					<nav class="ahr-nav"></nav>
+					<div class="ahr-side-foot">
+						<label class="ahr-company-wrap" title="${__("Company")}">
+							<i class="fa fa-building"></i>
+							<select class="ahr-company"></select>
+						</label>
+						<div class="ahr-side-tools">
+							<button class="ahr-side-btn ahr-back" title="${__("Back to ERP")}"><i class="fa fa-arrow-left"></i></button>
+							<button class="ahr-side-btn ahr-fs" title="${__("Fullscreen")}"><i class="fa fa-arrows-alt"></i></button>
+							<button class="ahr-side-btn ahr-sb-toggle" title="${__("Collapse sidebar")}"><i class="fa fa-angle-double-left"></i></button>
 						</div>
-						<select class="ahr-company form-control"></select>
-						<button class="btn btn-default ahr-back" title="${__("Back to ERP")}"><i class="fa fa-arrow-left"></i></button>
-						<button class="btn btn-default ahr-fs" title="${__("Fullscreen")}"><i class="fa fa-arrows-alt"></i></button>
-						<button class="btn btn-default ahr-refresh" title="${__("Refresh")}"><i class="fa fa-refresh"></i></button>
 					</div>
+				</aside>
+				<div class="ahr-shell">
+					<div class="ahr-bar">
+						<div class="ahr-pagebar"></div>
+						<div class="ahr-bar-tools">
+							<div class="ahr-quick-wrap">
+								<button class="btn btn-primary ahr-quick-btn"><i class="fa fa-bolt"></i> <span>${__("New")}</span> <i class="fa fa-caret-down"></i></button>
+								<div class="ahr-quick-menu"></div>
+							</div>
+							<button class="btn btn-default ahr-refresh" title="${__("Refresh")}"><i class="fa fa-refresh"></i></button>
+						</div>
+					</div>
+					<div class="ahr-content"></div>
 				</div>
-				<div class="ahr-pagebar"></div>
-				<div class="ahr-content"></div>
 			</div>`).appendTo(this.page.body);
 
+		const shell = frame.find(".ahr-shell");
+		this.$frame = frame;
 		this.$shell = shell;
-		this.$tabs = shell.find(".ahr-tabs");
+		this.$nav = frame.find(".ahr-nav");
 		this.$pagebar = shell.find(".ahr-pagebar");
 		this.$content = shell.find(".ahr-content");
-		this.$company = shell.find(".ahr-company");
+		this.$company = frame.find(".ahr-company");
+
+		// Sidebar width preference, remembered per browser. Below 1024px the rail is
+		// forced regardless, so the preference is stored rather than read back blindly.
+		this._sbPref = false;
+		try {
+			this._sbPref = localStorage.getItem("ahr_sidebar_collapsed") === "1";
+		} catch (e) {
+			/* storage blocked */
+		}
+		this.applySidebar();
+		$(window).off("resize.ahrsb").on("resize.ahrsb", () => this.applySidebar());
+		frame.find(".ahr-sb-toggle").on("click", (e) => {
+			e.stopPropagation();
+			this._sbPref = !this.railForced() && !frame.hasClass("ahr-sb-collapsed");
+			try {
+				localStorage.setItem("ahr_sidebar_collapsed", this._sbPref ? "1" : "0");
+			} catch (err) {
+				/* storage blocked */
+			}
+			this.applySidebar();
+		});
+		frame.find(".ahr-brand-logo").on("click", () => this.go("overview"));
 
 		this.renderNav();
 		this.renderQuickActions();
@@ -518,29 +559,94 @@ class AngolaHR {
 			shell.find(".ahr-fs i").toggleClass("fa-arrows-alt", !active).toggleClass("fa-compress", active);
 			setTimeout(() => window.dispatchEvent(new Event("resize")), 80);
 		});
-		// Close any open tab dropdown when clicking elsewhere.
-		$(document).on("click.ahrdd", () => this.$tabs.find(".ahr-tab-wrap.open").removeClass("open"));
+		// Close an open rail flyout when clicking elsewhere.
+		$(document).on("click.ahrdd", () => this.closeFlyouts());
 	}
 
+	/* Below this width the sidebar is an icon rail whatever the user chose: at
+	 * 224px a rail plus a data table has nothing left for the table. */
+	railForced() {
+		return window.innerWidth <= 1024;
+	}
+
+	isRail() {
+		return this.$frame.hasClass("ahr-sb-collapsed");
+	}
+
+	applySidebar() {
+		const collapsed = this._sbPref || this.railForced();
+		if (collapsed === this.$frame.hasClass("ahr-sb-collapsed")) return;
+		this.$frame.toggleClass("ahr-sb-collapsed", collapsed);
+		this.closeFlyouts();
+		const label = collapsed ? __("Expand sidebar") : __("Collapse sidebar");
+		this.$frame.find(".ahr-sb-toggle").attr("title", label)
+			.find("i")
+			.toggleClass("fa-angle-double-left", !collapsed)
+			.toggleClass("fa-angle-double-right", collapsed);
+		// The bounded screens take their height from the viewport and their width
+		// from what is left beside the sidebar: let them re-measure, once now and
+		// once after the width transition has settled.
+		// Only re-measure. A synthetic window resize is NOT dispatched here: the
+		// charts already watch their own container, and firing both at once made
+		// frappe-charts redraw twice over the same nodes and throw removeChild.
+		if (this.applyLayout) this.applyLayout();
+		setTimeout(() => { if (this.applyLayout) this.applyLayout(); }, 220);
+	}
+
+	closeFlyouts() {
+		if (!this.$nav) return;
+		this.$nav.find(".ahr-nav-group.flyout").removeClass("flyout");
+	}
+
+	/* In the rail a group opens BESIDE its icon rather than under it: there is no
+	 * room for a label under a 62px icon, and a stack of unlabelled children says
+	 * nothing. Fixed-positioned, so the nav's own scrolling cannot clip it. */
+	openFlyout($group) {
+		const wasOpen = $group.hasClass("flyout");
+		this.closeFlyouts();
+		if (wasOpen) return;
+		$group.addClass("flyout");
+		const $kids = $group.children(".ahr-nav-kids");
+		const top = $group[0].getBoundingClientRect().top;
+		const height = $kids.outerHeight() || 0;
+		$kids.css("top", Math.round(Math.max(8, Math.min(top, window.innerHeight - height - 12))) + "px");
+	}
+
+	/* One entry per HR area. A group is a collapsible item, not six loose links:
+	 * thirty screens listed flat is a wall nobody reads. */
 	renderNav() {
-		this.$tabs.empty();
+		this.$nav.empty();
 		NAV.forEach((n) => {
-			if (n.children) {
-				const $wrap = $(`<div class="ahr-tab-wrap" data-group="${n.group}"></div>`);
-				const $tab = $(`<button class="ahr-tab ahr-tab-dd"><i class="fa ${n.icon}"></i> <span>${__(n.label)}</span> <i class="fa fa-caret-down ahr-caret"></i></button>`)
-					.on("click", (e) => { e.stopPropagation(); this.$tabs.find(".ahr-tab-wrap.open").not($wrap).removeClass("open"); $wrap.toggleClass("open"); });
-				const $menu = $(`<div class="ahr-dd-menu"></div>`);
-				n.children.forEach((c) => {
-					$(`<div class="ahr-dd-item" data-key="${c.key}"><i class="fa ${c.icon}"></i> <span>${__(c.label)}</span></div>`)
-						.appendTo($menu)
-						.on("click", (e) => { e.stopPropagation(); $wrap.removeClass("open"); this.go(c.key); });
-				});
-				$wrap.append($tab, $menu).appendTo(this.$tabs);
-			} else {
-				$(`<button class="ahr-tab" data-key="${n.key}"><i class="fa ${n.icon}"></i> <span>${__(n.label)}</span></button>`)
-					.appendTo(this.$tabs)
-					.on("click", () => this.go(n.key));
+			if (!n.children) {
+				$(`<button type="button" class="ahr-nav-link" data-key="${n.key}" title="${__(n.label)}">
+						<span class="ahr-nav-ico"><i class="fa ${n.icon}"></i></span>
+						<span class="ahr-nav-label">${__(n.label)}</span>
+					</button>`)
+					.appendTo(this.$nav)
+					.on("click", () => { this.closeFlyouts(); this.go(n.key); });
+				return;
 			}
+			const $group = $(`<div class="ahr-nav-group" data-group="${n.group}"></div>`).appendTo(this.$nav);
+			$(`<button type="button" class="ahr-nav-link ahr-nav-head" title="${__(n.label)}">
+					<span class="ahr-nav-ico"><i class="fa ${n.icon}"></i></span>
+					<span class="ahr-nav-label">${__(n.label)}</span>
+					<i class="fa fa-angle-down ahr-nav-caret" aria-hidden="true"></i>
+				</button>`)
+				.appendTo($group)
+				.on("click", (e) => {
+					e.stopPropagation();
+					if (this.isRail()) this.openFlyout($group);
+					else $group.toggleClass("open");
+				});
+			const $kids = $(`<div class="ahr-nav-kids"></div>`).appendTo($group);
+			n.children.forEach((c) => {
+				$(`<button type="button" class="ahr-nav-link ahr-nav-kid" data-key="${c.key}" title="${__(c.label)}">
+						<span class="ahr-nav-ico"><i class="fa ${c.icon}"></i></span>
+						<span class="ahr-nav-label">${__(c.label)}</span>
+					</button>`)
+					.appendTo($kids)
+					.on("click", (e) => { e.stopPropagation(); this.closeFlyouts(); this.go(c.key); });
+			});
 		});
 	}
 
@@ -564,7 +670,7 @@ class AngolaHR {
 		});
 		$wrap.find(".ahr-quick-btn").on("click", (e) => {
 			e.stopPropagation();
-			this.$tabs.find(".ahr-tab-wrap.open").removeClass("open");
+			this.closeFlyouts();
 			$wrap.toggleClass("open");
 		});
 		$(document).on("click.ahrquick", () => $wrap.removeClass("open"));
@@ -949,11 +1055,15 @@ class AngolaHR {
 		this._gen += 1;
 		// Tear the previous screen's charts down BEFORE its container is replaced.
 		this.destroyCharts();
-		this.$tabs.find(".ahr-tab, .ahr-dd-item").removeClass("active");
-		this.$tabs.find(`[data-key="${this.state.view}"]`).addClass("active");
-		// Highlight the dropdown tab that owns the active view (Settings group).
+		this.$nav.find(".ahr-nav-link").removeClass("active active-group");
+		this.$nav.find(`.ahr-nav-link[data-key="${this.state.view}"]`).addClass("active");
+		// Mark the group that owns the active view, and open it so the current screen
+		// is always visible in the menu rather than hidden inside a closed group.
 		const grp = NAV.find((n) => n.children && n.children.some((c) => c.key === this.state.view));
-		if (grp) this.$tabs.find(`.ahr-tab-wrap[data-group="${grp.group}"] .ahr-tab-dd`).addClass("active");
+		if (grp) {
+			const $g = this.$nav.find(`.ahr-nav-group[data-group="${grp.group}"]`).addClass("open");
+			$g.children(".ahr-nav-head").addClass("active-group");
+		}
 		this.renderPageBar(grp);
 		this.$content.html(`<div class="ahr-empty"><i class="fa fa-spinner fa-spin"></i> ${__("Loading")}…</div>`);
 		const fn = this["view_" + this.state.view];
