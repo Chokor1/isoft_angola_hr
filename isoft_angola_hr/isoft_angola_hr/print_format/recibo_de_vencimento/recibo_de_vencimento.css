@@ -1,5 +1,6 @@
 /* Recibo de Vencimento / Payslip — Isoft Angola HR.
-   A4 portrait, one copy per page. Targets wkhtmltopdf (Qt WebKit): tables, pt units,
+   A4 portrait, one copy per page, each filling its page (HR, October 2026: larger print, two pages
+   per sheet stays legible). Targets wkhtmltopdf (Qt WebKit): tables, pt units,
    no flexbox or grid. Everything is scoped to .rv so no other print format is touched.
 
    The four .print-format margin declarations below are read by
@@ -22,7 +23,7 @@
 
 .rv {
   font-family: "Liberation Sans", Arial, Helvetica, sans-serif;
-  font-size: 8.2pt;
+  font-size: 11.07pt;
   line-height: 1.25;
   color: #111;
   width: 100%;
@@ -38,51 +39,51 @@
 
 .rv .rv-strong { font-weight: bold; }
 .rv .rv-muted { color: #555; }
-.rv .rv-mono { font-family: "Liberation Mono", "DejaVu Sans Mono", monospace; letter-spacing: .2pt; }
+.rv .rv-mono { font-family: "Liberation Mono", "DejaVu Sans Mono", monospace; letter-spacing: 0.27pt; }
 
 /* ---- copies ---- */
 .rv .rv-break { page-break-before: always; }
 
 /* ---- header ---- */
-.rv .rv-head { margin-bottom: 5pt; border-bottom: 1.6pt solid #1a1a1a; }
-.rv .rv-head td { padding: 0 0 5pt 0 !important; }
+.rv .rv-head { margin-bottom: 6.75pt; border-bottom: 2.16pt solid #1a1a1a; }
+.rv .rv-head td { padding: 0 0 6.75pt 0 !important; }
 .rv .rv-head-co { width: 50%; }
 .rv .rv-head-doc { width: 50%; text-align: right; }
 .rv .rv-co { width: auto; }
 .rv .rv-co td { padding: 0 !important; vertical-align: middle !important; }
 /* An explicit cell width: Frappe's print stylesheet gives every image max-width:100%,
-   and 100% of an auto-sized cell is whatever WebKit felt like — once it was 1pt. */
-.rv .rv-co-name { font-size: 12.5pt; font-weight: bold; letter-spacing: .3pt; margin-bottom: 1.5pt; }
-.rv .rv-co-line { font-size: 8pt; word-wrap: break-word; }
+   and 100% of an auto-sized cell is whatever WebKit felt like — once it was 1.35pt. */
+.rv .rv-co-name { font-size: 16.88pt; font-weight: bold; letter-spacing: 0.41pt; margin-bottom: 2.03pt; }
+.rv .rv-co-line { font-size: 10.8pt; word-wrap: break-word; }
 .rv .rv-title {
-  font-size: 14pt; font-weight: bold; letter-spacing: 1pt; text-transform: uppercase;
-  color: #1a1a1a; margin-bottom: 3pt; white-space: nowrap;
+  font-size: 18.9pt; font-weight: bold; letter-spacing: 1.35pt; text-transform: uppercase;
+  color: #1a1a1a; margin-bottom: 4.05pt; white-space: nowrap;
 }
 .rv .rv-copy-label {
-  display: inline-block; border: 1pt solid #1a1a1a; padding: 1.5pt 6pt !important;
-  font-size: 7.6pt; font-weight: bold; letter-spacing: .8pt; text-transform: uppercase;
-  margin-bottom: 5pt; white-space: nowrap;
+  display: inline-block; border: 1.35pt solid #1a1a1a; padding: 2.03pt 8.1pt !important;
+  font-size: 10.26pt; font-weight: bold; letter-spacing: 1.08pt; text-transform: uppercase;
+  margin-bottom: 6.75pt; white-space: nowrap;
 }
 .rv .rv-doc-meta { width: auto; margin-left: auto; }
-.rv .rv-doc-meta td { padding: .6pt 0 !important; font-size: 8pt; }
-.rv .rv-doc-meta .k { color: #555; padding-right: 8pt !important; text-align: right; }
+.rv .rv-doc-meta td { padding: 0.81pt 0 !important; font-size: 10.8pt; }
+.rv .rv-doc-meta .k { color: #555; padding-right: 10.8pt !important; text-align: right; }
 .rv .rv-doc-meta .v { font-weight: bold; text-align: right; white-space: nowrap; }
 
 /* ---- stamps ---- */
 .rv .rv-stamp {
-  border: 1.2pt solid #b00020; color: #b00020; padding: 3pt 6pt !important; margin: 0 0 7pt 0;
-  font-weight: bold; font-size: 9pt; text-align: center; letter-spacing: 1.5pt;
+  border: 1.62pt solid #b00020; color: #b00020; padding: 4.05pt 8.1pt !important; margin: 0 0 9.45pt 0;
+  font-weight: bold; font-size: 12.15pt; text-align: center; letter-spacing: 2.03pt;
 }
 
 /* ---- section captions ---- */
 .rv .rv-sec-title {
-  font-size: 7.6pt; font-weight: bold; text-transform: uppercase; letter-spacing: .9pt;
-  color: #333; background: #ededed; padding: 1.8pt 5pt; margin: 4pt 0 2pt 0;
-  border-left: 2.4pt solid #1a1a1a;
+  font-size: 10.26pt; font-weight: bold; text-transform: uppercase; letter-spacing: 1.22pt;
+  color: #333; background: #ededed; padding: 2.43pt 6.75pt; margin: 5.4pt 0 2.7pt 0;
+  border-left: 3.24pt solid #1a1a1a;
 }
 
 /* ---- key / value grid ---- */
-.rv .rv-kv td { padding: 1.5pt 4pt !important; border-bottom: .5pt solid #dcdcdc; font-size: 8pt; }
+.rv .rv-kv td { padding: 2.03pt 5.4pt !important; border-bottom: 0.68pt solid #dcdcdc; font-size: 10.8pt; }
 .rv .rv-kv .k { width: 16%; color: #555; }
 .rv .rv-kv .v { width: 34%; word-wrap: break-word; }
 .rv .rv-kv-1 .k { width: 38%; }
@@ -90,69 +91,93 @@
 
 /* ---- processing stat boxes ---- */
 .rv .rv-stats td {
-  padding: 2.5pt 5pt !important; border: .6pt solid #cfcfcf; background: #fafafa;
+  padding: 3.38pt 6.75pt !important; border: 0.81pt solid #cfcfcf; background: #fafafa;
   text-align: center; width: 20%;
 }
-.rv .rv-stats .k { font-size: 7pt; color: #555; text-transform: uppercase; letter-spacing: .4pt; }
-.rv .rv-stats .v { font-size: 9.2pt; font-weight: bold; margin-top: 1pt; white-space: nowrap; }
+.rv .rv-stats .k { font-size: 9.45pt; color: #555; text-transform: uppercase; letter-spacing: 0.54pt; }
+.rv .rv-stats .v { font-size: 12.42pt; font-weight: bold; margin-top: 1.35pt; white-space: nowrap; }
 
 /* ---- earnings / deductions ---- */
-.rv .rv-lines { table-layout: fixed; margin-bottom: 2pt; }
+.rv .rv-lines { table-layout: fixed; margin-bottom: 2.7pt; }
 .rv .rv-lines thead { display: table-header-group; }
 .rv .rv-lines th {
-  font-size: 7.4pt; font-weight: bold; text-transform: uppercase; letter-spacing: .5pt;
-  color: #333; text-align: left; padding: 2pt 5pt !important;
-  border-top: .9pt solid #1a1a1a; border-bottom: .9pt solid #1a1a1a !important;
+  font-size: 9.99pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.68pt;
+  color: #333; text-align: left; padding: 2.7pt 6.75pt !important;
+  border-top: 1.22pt solid #1a1a1a; border-bottom: 1.22pt solid #1a1a1a !important;
 }
-.rv .rv-lines td { padding: 1.8pt 5pt !important; border-bottom: .5pt solid #dcdcdc; word-wrap: break-word; }
+.rv .rv-lines td { padding: 2.43pt 6.75pt !important; border-bottom: 0.68pt solid #dcdcdc; word-wrap: break-word; }
 .rv .rv-lines .c-code { width: 13%; white-space: nowrap; }
 .rv .rv-lines .c-desc { width: 59%; }
 .rv .rv-lines .c-amt { width: 28%; text-align: right; white-space: nowrap; }
 .rv .rv-lines th.c-amt { text-align: right; }
 .rv .rv-lines .rv-memo td { color: #666; font-style: italic; }
-.rv .rv-lines .rv-memo-tag { font-size: 7pt; }
+.rv .rv-lines .rv-memo-tag { font-size: 9.45pt; }
 .rv .rv-lines .rv-empty td { text-align: center; color: #888; }
 .rv .rv-lines tfoot .rv-total td {
-  font-weight: bold; border-top: .9pt solid #1a1a1a; border-bottom: 0; padding-top: 2.5pt !important;
+  font-weight: bold; border-top: 1.22pt solid #1a1a1a; border-bottom: 0; padding-top: 3.38pt !important;
   text-align: right;
 }
 .rv .rv-lines tr { page-break-inside: avoid; }
 
 /* ---- warning ---- */
 .rv .rv-warn {
-  border: 1pt solid #b00020; color: #b00020; padding: 3pt 6pt !important; margin: 6pt 0 0 0;
-  font-weight: bold; font-size: 7.8pt;
+  border: 1.35pt solid #b00020; color: #b00020; padding: 4.05pt 8.1pt !important; margin: 8.1pt 0 0 0;
+  font-weight: bold; font-size: 10.53pt;
 }
 
 /* ---- payment + summary ---- */
-.rv .rv-bottom { margin-top: 2pt; page-break-inside: avoid; }
+.rv .rv-bottom { margin-top: 2.7pt; page-break-inside: avoid; }
 .rv .rv-bottom > tbody > tr > td { padding: 0 !important; }
-.rv .rv-pay { width: 50%; padding-right: 10pt !important; }
-.rv .rv-sum { width: 50%; padding-left: 10pt !important; }
-.rv .rv-summary td { padding: 1.7pt 5pt !important; border-bottom: .5pt solid #dcdcdc; font-size: 8.2pt; }
+.rv .rv-pay { width: 50%; padding-right: 13.5pt !important; }
+.rv .rv-sum { width: 50%; padding-left: 13.5pt !important; }
+.rv .rv-summary td { padding: 2.29pt 6.75pt !important; border-bottom: 0.68pt solid #dcdcdc; font-size: 11.07pt; }
 .rv .rv-summary .k { color: #333; }
 .rv .rv-summary .v { text-align: right; white-space: nowrap; font-weight: bold; width: 38%; }
 .rv .rv-summary .rv-net td {
-  background: #1a1a1a; color: #fff; font-weight: bold; font-size: 9.8pt;
-  padding: 4pt 6pt !important; border-bottom: 0; text-transform: uppercase; letter-spacing: .5pt;
+  background: #1a1a1a; color: #fff; font-weight: bold; font-size: 13.23pt;
+  padding: 5.4pt 8.1pt !important; border-bottom: 0; text-transform: uppercase; letter-spacing: 0.68pt;
 }
 .rv .rv-summary .rv-net .k { color: #fff; white-space: nowrap; }
 
 /* ---- confirmation ---- */
-.rv .rv-decl { font-style: italic; margin: 2pt 0 8pt 0; padding: 0 4pt; }
+.rv .rv-decl { font-style: italic; margin: 2.7pt 0 10.8pt 0; padding: 0 5.4pt; }
 .rv .rv-sign { page-break-inside: avoid; }
 .rv .rv-sign td { padding: 0 !important; }
 .rv .rv-sign-l { width: 55%; }
 .rv .rv-sign-gap { width: 45%; }
-.rv .rv-sign-line { border-bottom: .8pt solid #1a1a1a; height: 11pt; }
-.rv .rv-sign-cap { font-size: 7.6pt; color: #333; margin-top: 2pt; }
+.rv .rv-sign-line { border-bottom: 1.08pt solid #1a1a1a; height: 14.85pt; }
+.rv .rv-sign-cap { font-size: 10.26pt; color: #333; margin-top: 2.7pt; }
 
 /* ---- footer ---- */
-.rv .rv-foot { margin-top: 5pt; border-top: .5pt solid #bbb; }
-.rv .rv-foot td { padding: 2pt 0 0 0 !important; font-size: 6.8pt; color: #666; }
+.rv .rv-foot { margin-top: 6.75pt; border-top: 0.68pt solid #bbb; }
+.rv .rv-foot td { padding: 2.7pt 0 0 0 !important; font-size: 9.18pt; color: #666; }
 .rv .rv-foot-r { text-align: right; }
 
 @media print {
   .rv table, .rv tr { page-break-inside: avoid; }
   .rv thead { display: table-header-group; }
 }
+
+/* ---- each copy fills its page (HR, October 2026) ----
+   A fixed-height table: the content sits at the top, the confirmation and the footer at
+   the bottom. Sizes above are the September layout scaled by 1.35 so the content itself
+   is larger; the height is the printable A4 height inside the page margins above. */
+.rv .rv-page { width: 100%; height: 272mm; }
+.rv .rv-page td.rv-page-main { vertical-align: top !important; }
+.rv .rv-page td.rv-page-end { vertical-align: bottom !important; height: 1px; }
+
+/* Key/value tables at the larger size: labels on one line, and the IBAN (monospaced, 25
+   characters) kept inside the payment column. */
+.rv .rv-kv td { font-size: 10.2pt; }
+.rv .rv-kv .k { width: 22%; }
+.rv .rv-kv .v { width: 28%; }
+.rv .rv-kv-1 { table-layout: fixed; }
+.rv .rv-kv-1 .k { width: 40%; font-size: 9.6pt; }
+.rv .rv-kv-1 .v { width: 60%; }
+.rv .rv-kv td.rv-mono { font-size: 9.2pt; letter-spacing: 0; white-space: nowrap; }
+.rv .rv-pay { width: 53%; }
+/* The title and the header labels: wide enough to read, never wider than their column
+   (a long title once pushed the whole page past the A4 width). */
+.rv .rv-title { font-size: 16pt; letter-spacing: .6pt; }
+.rv .rv-doc-meta .k { white-space: nowrap; }
+.rv .rv-sum { width: 47%; }

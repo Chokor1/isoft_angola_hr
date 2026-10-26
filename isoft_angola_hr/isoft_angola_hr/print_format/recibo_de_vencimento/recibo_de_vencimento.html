@@ -2,6 +2,8 @@
 
     A4 portrait, two copies back to back: page 1 ORIGINAL (for the employee), page 2
     DUPLICADO - ARQUIVO EMPRESA (for the company file). Both copies print the same data.
+    Each copy fills its page (.rv-page): content at the top, confirmation and footer at the
+    bottom, so the receipt stays legible when HR prints two pages per sheet.
 
     LANGUAGE — every label goes through t(), i.e. _() with the receipt's own translation
     context, resolved while this template renders, so the receipt follows the language of
@@ -40,7 +42,7 @@
       {%- for row in rows %}
       <tr>
         <td class="c-code">{{ row.code }}</td>
-        <td class="c-desc">{{ row.label }}</td>
+        <td class="c-desc">{{ row.label }}{% if row.hours %} ({{ qty(row.hours) }} h){% endif %}</td>
         <td class="c-amt">{{ money(row.amount) }}</td>
       </tr>
       {%- endfor %}
@@ -67,6 +69,7 @@
 
 {%- macro receipt(copy, page_no, page_count) -%}
 <div class="rv-copy rv-copy-{{ copy.key }}{% if page_no > 1 %} rv-break{% endif %}">
+<table class="rv-page"><tr><td class="rv-page-main">
 
   <!-- ================= HEADER: company master data + document identity ================= -->
   <table class="rv-head">
@@ -90,7 +93,7 @@
         <table class="rv-doc-meta">
           <tr><td class="k">{{ t("Document No.") }}</td><td class="v">{{ r.document }}</td></tr>
           <tr><td class="k">{{ t("Period") }}</td><td class="v">{{ r.period_label }}</td></tr>
-          <tr><td class="k">{{ t("Issue Date") }}</td><td class="v">{{ d(r.posting_date) }}</td></tr>
+          <tr><td class="k">{{ t("Issue Date") }}</td><td class="v">{{ d(r.issue_date) }}</td></tr>
         </table>
       </td>
     </tr>
@@ -99,6 +102,8 @@
   {%- if r.is_draft %}<div class="rv-stamp">{{ t("DRAFT - NO LEGAL VALUE") }}</div>{% endif %}
   {%- if r.is_cancelled %}<div class="rv-stamp">{{ t("CANCELLED") }}</div>{% endif %}
 
+</td></tr>
+<tr><td class="rv-page-main">
   <!-- ================= EMPLOYEE ================= -->
   <div class="rv-sec-title">{{ t("Employee") }}</div>
   <table class="rv-kv">
@@ -126,39 +131,11 @@
     </tr>
   </table>
 
-  <!-- ================= PROCESSING ================= -->
-  <div class="rv-sec-title">{{ t("Processing Information") }}</div>
-  <table class="rv-stats">
-    <tr>
-      <td>
-        <div class="k">{{ t("Processing Period") }}</div>
-        <div class="v">{{ d(r.start_date) }} &ndash; {{ d(r.end_date) }}</div>
-      </td>
-      <td>
-        <div class="k">{{ t("Paid Days") }}</div>
-        <div class="v">{{ qty(r.days.paid) }}</div>
-      </td>
-      <td>
-        <div class="k">{{ t("Total Working Days") }}</div>
-        <div class="v">{{ qty(r.days.total) }}</div>
-      </td>
-      <td>
-        <div class="k">{{ t("Absence Days") }}</div>
-        <div class="v">{{ qty(r.days.absence) }}</div>
-      </td>
-      <td>
-        <div class="k">{{ t("Leave Days") }}</div>
-        <div class="v">{{ qty(r.days.leave) }}</div>
-      </td>
-      {%- if r.days.overtime_hours %}
-      <td>
-        <div class="k">{{ t("Overtime Hours") }}</div>
-        <div class="v">{{ qty(r.days.overtime_hours) }}</div>
-      </td>
-      {%- endif %}
-    </tr>
-  </table>
+  {#- No Processing Information box (period, paid / working / absence / leave days): removed
+      at HR's request, October 2026. Overtime hours are printed on the overtime line. -#}
 
+</td></tr>
+<tr><td class="rv-page-main">
   <!-- ================= EARNINGS (dynamic, from the slip's own rows) ================= -->
   {#- The itemised deductions table is deliberately not printed (HR review, Sept 2026):
       the Summary carries employee INSS, IRT and the total of deductions. -#}
@@ -169,6 +146,8 @@
   <div class="rv-warn">{{ t("Warning: the printed totals do not reconcile with the processed salary slip. Contact Human Resources.") }}</div>
   {%- endif %}
 
+</td></tr>
+<tr><td class="rv-page-main">
   <!-- ================= PAYMENT + SUMMARY ================= -->
   <table class="rv-bottom">
     <tr>
@@ -215,6 +194,9 @@
     </tr>
   </table>
 
+</td></tr>
+<tr><td class="rv-page-end">
+
   <!-- ================= EMPLOYEE CONFIRMATION ================= -->
   <div class="rv-sec-title">{{ t("Employee Confirmation") }}</div>
   <table class="rv-sign">
@@ -235,6 +217,7 @@
       <td class="rv-foot-r">{{ t(copy.label) }} &middot; {{ t("Page") }} {{ page_no }}/{{ page_count }}</td>
     </tr>
   </table>
+</td></tr></table>
 </div>
 {%- endmacro -%}
 
