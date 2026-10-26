@@ -22,7 +22,7 @@ be narrow, so a later change that grants a role blanket rights fails these too.
 import json
 
 import frappe
-from frappe.utils import add_days, nowdate
+from frappe.utils import add_days, getdate, nowdate
 
 from isoft_angola_hr.isoft_angola_hr import api, hr_api
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings import (
@@ -30,8 +30,11 @@ from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings.isoft_hr_settings
 )
 from isoft_angola_hr.isoft_angola_hr.install import _has_perm, grant_capability_docperms
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.services import leave_days
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readiness
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 ROLES = ("HR User", "HR Manager", "Payroll Officer", "Payroll Manager",
          "Payroll Finance Approver", "Accounts Manager")
@@ -163,8 +166,11 @@ class TestLeaveApprovalCompletes(GateFixture):
 			alloc.submit()
 			self._created.append(("Leave Allocation", alloc.name))
 			type(self)._alloc = alloc.name
-		# each test needs its own day: ERPNext refuses two applications that overlap
-		day = add_days(nowdate(), day_offset)
+		# each test needs its own day: ERPNext refuses two applications that overlap. It
+		# must also be a leave day: a Saturday or Sunday counts 0 and is refused
+		day = getdate(add_days(nowdate(), day_offset))
+		while not leave_days.leave_dates(self.employee.name, lt, day, day):
+			day = add_days(day, 1)
 		doc = frappe.get_doc({
 			"doctype": "Leave Application", "employee": self.employee.name,
 			"leave_type": lt, "from_date": day, "to_date": day,

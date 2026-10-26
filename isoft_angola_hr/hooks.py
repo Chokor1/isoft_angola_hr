@@ -145,6 +145,12 @@ doc_events = {
 	"Journal Entry": {
 		"on_cancel": "isoft_angola_hr.isoft_angola_hr.api.unlink_cancelled_payroll_entry",
 	},
+	# Leave days count Monday to Friday only (services/leave_days.py). This runs ahead of
+	# ERPNext's validate, which is where total_leave_days is computed, so the rule is in
+	# place even in a process that has not imported this app yet.
+	"Leave Application": {
+		"before_validate": "isoft_angola_hr.isoft_angola_hr.services.leave_days.ensure_installed",
+	},
 	# NOTIFICATIONS REMOVED. Five handlers used to hang here — payslip available, leave
 	# requested, leave decided, bank change decided, advance status — each firing on a
 	# document event and writing to the bell menu.
@@ -200,7 +206,8 @@ scheduler_events = {
 # Testing
 # -------
 
-# before_tests = "isoft_angola_hr.install.before_tests"
+# Database-writing tests run only on a site marked as disposable (payroll/testing_guard.py).
+before_tests = "isoft_angola_hr.isoft_angola_hr.payroll.testing_guard.before_tests"
 
 # Overriding Methods
 # ------------------------------
@@ -223,6 +230,9 @@ scheduler_events = {
 # Request Events
 # ----------------
 # before_request = ["isoft_angola_hr.utils.before_request"]
+# The leave-day rule for the read paths: the Desk Leave Application form's live figure,
+# self-service previews, balances (services/leave_days.py).
+before_request = ["isoft_angola_hr.isoft_angola_hr.services.leave_days.ensure_installed"]
 # after_request = ["isoft_angola_hr.utils.after_request"]
 
 # Job Events

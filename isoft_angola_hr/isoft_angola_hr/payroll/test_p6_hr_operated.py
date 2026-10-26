@@ -40,9 +40,12 @@ from isoft_angola_hr.isoft_angola_hr.services import advances
 from isoft_angola_hr.isoft_angola_hr.services import contracts
 from isoft_angola_hr.isoft_angola_hr.services import employee_lifecycle as lifecycle
 from isoft_angola_hr.isoft_angola_hr.services import hr_operations as ops
+from isoft_angola_hr.isoft_angola_hr.services import leave_days
 from isoft_angola_hr.isoft_angola_hr.services import performance
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import salary_change as sc
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 def _separation_required(test, module, attr="requires_separate_approval"):
 	"""Pin the segregation switch this test is about, without touching the database.
@@ -137,10 +140,13 @@ class HROperatedFixture(ReleaseFixture):
 		"""
 		self.no_commit()
 		employee = employee or self.offline
-		values = {
-			"employee": employee, "leave_type": self.leave_type(),
-			"from_date": add_days(nowdate(), offset), "to_date": add_days(nowdate(), offset),
-		}
+		# the first day on or after the offset that counts as a leave day: a Saturday,
+		# Sunday or holiday is 0 days and ERPNext refuses a request with no day in it
+		leave_type = self.leave_type()
+		day = getdate(add_days(nowdate(), offset))
+		while not leave_days.leave_dates(employee, leave_type, day, day):
+			day = add_days(day, 1)
+		values = {"employee": employee, "leave_type": leave_type, "from_date": day, "to_date": day}
 		values.update(kwargs)
 		name = api.create_leave(values)
 		self.addCleanup(self._drop_leave, name)

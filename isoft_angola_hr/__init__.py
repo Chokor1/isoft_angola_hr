@@ -34,11 +34,21 @@ def _install_runtime_patches():
 	nothing and the import must not fail.
 
 	See isoft_angola_hr/shift_weekday.py for what is patched and why.
+
+	Also replaces ERPNext's leave-day count with this app's rule: Monday to Friday only,
+	public holidays per the Leave Type (services/leave_days.py). Separate try, so one
+	failing cannot stop the other.
 	"""
 	try:
 		from isoft_angola_hr.isoft_angola_hr.shift_weekday import install_patches
 
 		install_patches()
+	except Exception:
+		pass
+	try:
+		from isoft_angola_hr.isoft_angola_hr.services.leave_days import install_patches as leave_days
+
+		leave_days()
 	except Exception:
 		pass
 
