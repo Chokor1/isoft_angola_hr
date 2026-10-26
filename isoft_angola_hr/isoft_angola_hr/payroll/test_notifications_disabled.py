@@ -39,6 +39,8 @@ from isoft_angola_hr.isoft_angola_hr.services import hr_notifications as notify
 from isoft_angola_hr.isoft_angola_hr.services import notification_policy as policy
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -498,6 +500,8 @@ class TestTheMessagesPeopleNeedStillWork(SilenceFixture):
 		                "the refusal came back with no message")
 
 	def test_self_approval_is_still_blocked_and_still_says_why(self):
+		# asserts the documented approval policy, whatever the site runs
+		self.pin_settings(**self.DOCUMENTED_APPROVAL_POLICY)
 		entry = frappe.get_doc({
 			"doctype": "Isoft Payroll Entry", "company": self.company,
 			"posting_date": self.end, "start_date": self.start, "end_date": self.end,
@@ -641,6 +645,8 @@ class TestNoUnguardedWriter(unittest.TestCase):
 				if not name.endswith((".py", ".js")) or name.startswith("test_"):
 					continue
 				src = io.open(os.path.join(base, name), encoding="utf-8").read()
+				if name == "testing_guard.py" and "publish_realtime(" not in src:
+					continue   # it silences realtime during protected test runs; it never emits
 				if "publish_realtime" in src:
 					offenders.append(name)
 		self.assertEqual(offenders, [],

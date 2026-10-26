@@ -31,6 +31,8 @@ from frappe.utils import flt
 from isoft_angola_hr.isoft_angola_hr import api
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
 from isoft_angola_hr.isoft_angola_hr.services import payroll_print as pp
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 CURRENCY = "AKZ"
 

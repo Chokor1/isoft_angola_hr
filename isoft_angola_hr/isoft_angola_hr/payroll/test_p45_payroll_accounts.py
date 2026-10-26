@@ -30,12 +30,18 @@ import frappe
 from frappe.utils import flt
 
 from isoft_angola_hr.isoft_angola_hr import api
-from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import (
+	PREFIX,
+	PayrollFixture,
+	free_account_number,
+)
 from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
 from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readiness
 from isoft_angola_hr.isoft_angola_hr.services import payroll_reconciliation as recon
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import production_readiness as pr
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 
 class AccountsFixture(PayrollFixture):
@@ -112,7 +118,8 @@ class TestMissingAccounts(AccountsFixture):
 		self.assertIn("Liability or Asset", msg)
 		self.assertIn("Isoft HR Settings", msg)
 		self.assertFalse(frappe.db.get_value("Isoft Salary Slip", slip.name, "journal_entry"))
-		self.assertFalse(frappe.db.exists("Journal Entry", {"user_remark": "Payroll: " + slip.name}))
+		self.assertFalse(frappe.db.exists("Journal Entry", {"user_remark": "Payroll: " + slip.name,
+		                                                    "creation": (">=", self.test_started)}))
 
 	def test_missing_employer_inss_account_allows_calculation_and_blocks_posting(self):
 		self.unmap("CTSSE")
@@ -124,7 +131,8 @@ class TestMissingAccounts(AccountsFixture):
 		self.assertIn("Employer INSS", msg)
 		self.assertIn("Expense", msg)
 		self.assertIn("Account per Component", msg)
-		self.assertFalse(frappe.db.exists("Journal Entry", {"user_remark": "Payroll: " + slip.name}))
+		self.assertFalse(frappe.db.exists("Journal Entry", {"user_remark": "Payroll: " + slip.name,
+		                                                    "creation": (">=", self.test_started)}))
 
 	def test_a_slip_without_an_advance_does_not_need_the_advance_account(self):
 		"""Only the components on the slip are required — an unmapped ADT does not stop a
@@ -189,7 +197,8 @@ class TestWrongAccountType(AccountsFixture):
 		self.assertIn("Salary Advance", msg)
 		self.assertIn("Expense", msg)
 		self.assertIn("required", msg)
-		self.assertFalse(frappe.db.exists("Journal Entry", {"user_remark": "Payroll: " + slip.name}))
+		self.assertFalse(frappe.db.exists("Journal Entry", {"user_remark": "Payroll: " + slip.name,
+		                                                    "creation": (">=", self.test_started)}))
 
 	def test_posting_refuses_a_group_or_disabled_account(self):
 		group = frappe.db.get_value("Account", {"company": self.company, "root_type": "Liability",
@@ -262,7 +271,8 @@ class TestHistoricalProtection(AccountsFixture):
 		before = self.je_lines(je)
 		other = frappe.get_doc({
 			"doctype": "Account", "account_name": PREFIX + " INSS 3pct alternativa",
-			"account_number": "9999977", "company": self.company, "root_type": "Liability",
+			"account_number": free_account_number(self.company), "company": self.company,
+			"root_type": "Liability",
 			"is_group": 0, "parent_account": frappe.db.get_value(
 				"Account", self.acc["CTSS3"], "parent_account"),
 		}).insert(ignore_permissions=True)

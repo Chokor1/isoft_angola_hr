@@ -31,6 +31,8 @@ from frappe.utils import getdate
 from isoft_angola_hr.isoft_angola_hr import api
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PayrollFixture
 from isoft_angola_hr.isoft_angola_hr.services import salary_change, work_calendar
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 PREFIX = "_P36"
 SEP_START, SEP_END = "2026-09-01", "2026-09-30"
@@ -44,12 +46,16 @@ class CalendarFixture(PayrollFixture):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		shifts = frappe.get_all("Shift Type", pluck="name")
+		# The counts below assume the ITEC pattern: five weekdays and a short Saturday.
+		# A second shift without a Saturday exists on dev since 2026-10-16 (the NDA demo),
+		# and frappe.get_all's order is not by name, so the pattern is chosen, not the
+		# first shift that happens to have one.
 		cls.template_shift = next(
-			(n for n in shifts
-			 if frappe.get_doc("Shift Type", n).get("weekday_hours")), None)
+			(n for n in frappe.get_all("Shift Type", pluck="name", order_by="name")
+			 if any(r.weekday == "Saturday" and r.is_working_day
+			        for r in frappe.get_doc("Shift Type", n).get("weekday_hours") or [])), None)
 		if not cls.template_shift:
-			raise unittest.SkipTest("no Shift Type with a weekly schedule on this site")
+			raise unittest.SkipTest("no Shift Type with a working Saturday on this site")
 		cls.list_with = cls._holiday_list(PREFIX + " With Sept Holidays", SEP_HOLIDAYS)
 		cls.list_without = cls._holiday_list(PREFIX + " Without Sept Holidays", [])
 		cls.shift_with = cls._shift(PREFIX + " Shift With", cls.list_with)
@@ -138,6 +144,12 @@ class TestSeptember2026Holidays(CalendarFixture):
 
 class TestTwoEmployeesLegitimatelyDiffer(CalendarFixture):
 	"""The point of the whole calendar mechanism: the answer is per employee."""
+
+	def setUp(self):
+		super().setUp()
+		# the day counts asserted below are Calendar Working Days (whole days), the basis
+		# this site chose on 2026-08-24; pinned so the test does not inherit another one
+		self.pin_settings(working_days_basis="Calendar Working Days")
 
 	def _days(self, employee):
 		from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip \

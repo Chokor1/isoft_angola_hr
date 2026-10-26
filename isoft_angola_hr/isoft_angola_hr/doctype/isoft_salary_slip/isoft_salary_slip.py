@@ -12,6 +12,7 @@ from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_p
 )
 from isoft_angola_hr.isoft_angola_hr.payroll import engine
 from isoft_angola_hr.isoft_angola_hr.services import advances
+from isoft_angola_hr.isoft_angola_hr.services import overtime
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 
 
@@ -114,7 +115,7 @@ class IsoftSalarySlip(Document):
 	#: Monthly input fields and the Settings checkbox that governs each.
 	_INPUT_TOGGLES = (
 		("productivity_bonus", "PPD"),
-		("overtime_amount", "HEX"),
+		("overtime_hours", "HEX"),
 		("adiantamento", "ADT"),
 		("subsidio_ferias", "SFE"),
 		("subsidio_natal", "SNA"),
@@ -250,14 +251,36 @@ class IsoftSalarySlip(Document):
 				settings.get("natal_payment_month"),
 			)
 
+		# Overtime is entered as HOURS; the amount is calculated (services/overtime.py) and
+		# written back below. A draft from before that change carries only an amount, and
+		# recomputing it would zero it silently, so it is refused until somebody enters the
+		# hours behind it.
+		stored = None if self.is_new() else frappe.db.get_value(
+			self.doctype, self.name, ["overtime_hours", "overtime_amount"], as_dict=True)
+		if (stored and not flt(stored.overtime_hours) and flt(stored.overtime_amount)
+				and not self.overtime_hours):
+			frappe.throw(_("{0} has an overtime amount but no overtime hours. Overtime is now "
+			               "calculated from hours: enter the hours worked.").format(
+				frappe.bold(self.employee_name or self.employee)), title=_("Overtime Hours Required"))
+		who = self.employee_name or self.employee
+		overtime.assert_possible(self.overtime_hours, self.start_date, self.end_date, who=who)
+
+		days = engine_day_inputs(
+			self.employee, self.start_date, self.end_date,
+			validate_attendance=self.validate_attendance, based_on_timesheet=self.based_on_timesheet,
+			total_working_days=flt(self.total_working_days), payment_days=flt(self.payment_days),
+			payment_days_override=cint(self.get("payment_days_override")))
 		inputs = {
 			"productivity_bonus": flt(self.productivity_bonus),
-			"overtime_amount": flt(self.overtime_amount),
+			"overtime_hours": self.overtime_hours,
 			"adiantamento": flt(self.adiantamento),
 			"ferias_amount": flt(self.subsidio_ferias),
 			"natal_amount": flt(self.subsidio_natal),
-			"payment_days": flt(self.payment_days),
-			"total_working_days": flt(self.total_working_days),
+			"payment_days": days["engine_payment_days"],
+			"total_working_days": days["total_working_days"],
+			"absent_days": days["absent_days"],
+			"absent_hours": days["absent_hours"],
+			"late_minutes": days["late_minutes"],
 		}
 		inputs["start_date"] = self.start_date
 		inputs["end_date"] = self.end_date
@@ -276,6 +299,12 @@ class IsoftSalarySlip(Document):
 		for d in res["deductions"]:
 			self.append("deductions", d)
 
+		self.overtime_amount = res["overtime"]["total"]
+		self.absent_days = res["absences"]["absent_days"]
+		self.absent_hours = res["absences"]["absent_hours"]
+		self.late_minutes = res["absences"]["late_minutes"]
+		self.absence_deduction = res["absences"]["absence_deduction"]
+		self.late_deduction = res["absences"]["late_deduction"]
 		self.taxable_income = res["taxable_income"]
 		self.gross_pay = res["gross_pay"]
 		self.total_deduction = res["total_deduction"]
@@ -536,77 +565,114 @@ def compute_working_days(employee, start_date, end_date, validate_attendance=0, 
 		return twd, min(twd, flt(hours) / std)
 
 	if cint(validate_attendance):
-		# Hours-aware paid days: each day's shortfall is weighted by that date's shift day
-		# (full day = shift day-weight; partial = missing-hours share of it).
-		from isoft_angola_hr.isoft_angola_hr.doctype.isoft_attendance_occurrence.isoft_attendance_occurrence import (
-			occurrence_missing_by_date,
-		)
-
-		rows = frappe.db.sql(
-			"""select attendance_date, status, leave_type, working_hours from `tabAttendance`
-			where employee=%s and docstatus=1 and attendance_date between %s and %s""",
-			(employee, start, end), as_dict=True,
-		)
-		lwp_types = set(frappe.get_all("Leave Type", filters={"is_lwp": 1}, pluck="name"))
-		att = {}  # date -> missing days from Attendance
-		for r in rows:
-			d = getdate(r.attendance_date)
-			nh = shift_day_hours(shift, d)
-			if nh <= 0:
-				continue  # non-working day for this employee
-			w = day_value(shift, d, std, basis)  # value of a full day of THIS date
-			if r.status == "Absent":
-				m = w
-			elif r.status == "Half Day":
-				m = w / 2.0
-			elif r.status == "On Leave":
-				m = w if r.leave_type in lwp_types else 0.0
-			elif (r.status in ("Present", "Work From Home") and not counts_in_days(basis)
-			      and r.working_hours and flt(r.working_hours) < nh):
-				# Hour-equivalent basis only. Under a DAY basis the day is the unit and
-				# the status is the record: somebody marked Present is present, and
-				# docking part of their day because the hours field says 8 against a
-				# 9.5-hour shift silently re-prices attendance in hours — the same
-				# hours-as-days confusion this basis exists to avoid. It also assumes the
-				# shift span is all paid time, which for a 9.5-hour span that may include
-				# an unpaid break is not established. A partial absence under a day basis
-				# has to be recorded as one: Half Day, or an Attendance Occurrence, both
-				# of which still deduct below.
-				m = (nh - flt(r.working_hours)) / nh * w
-			else:
-				m = 0.0
-			att[d] = max(att.get(d, 0.0), m)
-
-		# Attendance Occurrences are authoritative for the days they cover: a Justified/Pending
-		# occurrence means no deduction; an Unjustified one deducts its missing portion.
-		covered, occ_deduct = occurrence_missing_by_date(employee, start, end, basis=basis)
-		missing = 0.0
-		for d in set(att) | set(covered):
-			missing += occ_deduct.get(d, 0.0) if d in covered else att.get(d, 0.0)
-		return twd, max(0, twd - missing)
+		# Paid days, for display: the total less the absent days HR's document prices
+		# (Absent / Unjustified full day = 1, Half Day = 0,5, unpaid leave = 1). Hours and
+		# late minutes are reported beside it, not folded into a fraction of a day. The
+		# money comes from services/absences.py through the engine, never from this count.
+		return twd, max(0.0, twd - absence_inputs(employee, start, end)["days"])
 
 	return twd, twd
 
 
-def attendance_overtime_amount(employee, base, working_days, start_date, end_date, multiplier):
-	"""Overtime pay from logged Attendance overtime hours:
-	Σ_day (daily_salary ÷ normal_hours(day)) × multiplier × overtime_hours(day),
-	where daily_salary = base ÷ period working days and normal_hours come from the shift.
-	Rest/non-working days fall back to the default weekday hours as the divisor."""
-	twd = flt(working_days)
-	if not twd:
-		return 0.0
-	daily = flt(base) / twd
-	mult = flt(multiplier) or 2.0
-	shift = employee_shift(employee, end_date)
-	rows = frappe.db.sql(
-		"""select attendance_date, custom_overtime_hours from `tabAttendance`
+def absence_inputs(employee, start_date, end_date):
+	"""What the period's attendance costs, counted the way HR's "Absence and Late Arrival
+	Deductions" (October 2026) prices it — see services/absences.py.
+
+	* ``days``: Attendance ``Absent`` or an Unjustified full-day occurrence = 1, a Half
+	  Day = 0,5, a day of unpaid leave (``is_lwp``) = 1. Only dates the employee's shift
+	  schedules count; an "Absent" on a Sunday deducts nothing.
+	* ``hours``: Unjustified partial absences and early exits (the occurrence's hours).
+	* ``late_minutes``: Unjustified lateness, accumulated (the occurrence's hours × 60).
+
+	An Attendance Occurrence is authoritative for the date it covers: Justified or still
+	Pending Justification means no deduction for that date, whatever Attendance says.
+	Only the employed part of the period is read (eligible_range).
+	"""
+	out = {"days": 0.0, "hours": 0.0, "late_minutes": 0.0, "detail": []}
+	start, end = eligible_range(employee, getdate(start_date), getdate(end_date))
+	if start > end:
+		return out
+	shift = employee_shift(employee, end)
+	lwp_types = set(frappe.get_all("Leave Type", filters={"is_lwp": 1}, pluck="name"))
+	att = {}
+	for r in frappe.db.sql(
+			"""select attendance_date, status, leave_type from `tabAttendance`
+			where employee=%s and docstatus=1 and attendance_date between %s and %s""",
+			(employee, start, end), as_dict=True):
+		d = getdate(r.attendance_date)
+		if shift_day_hours(shift, d) <= 0:
+			continue
+		if r.status == "Absent":
+			m = 1.0
+		elif r.status == "Half Day":
+			m = 0.5
+		elif r.status == "On Leave" and r.leave_type in lwp_types:
+			m = 1.0
+		else:
+			m = 0.0
+		att[d] = max(att.get(d, 0.0), m)
+	covered = set()
+	for o in frappe.get_all("Isoft Attendance Occurrence",
+	                        filters={"employee": employee,
+	                                 "occurrence_date": ["between", [start, end]]},
+	                        fields=["occurrence_date", "occurrence_type", "hours", "status"],
+	                        order_by="occurrence_date"):
+		d = getdate(o.occurrence_date)
+		covered.add(d)
+		if o.status != "Unjustified" or shift_day_hours(shift, d) <= 0:
+			continue
+		if o.occurrence_type == "Full Day":
+			out["days"] += 1.0
+			out["detail"].append({"date": str(d), "kind": "day", "value": 1.0})
+		elif o.occurrence_type == "Half Day":
+			out["days"] += 0.5
+			out["detail"].append({"date": str(d), "kind": "day", "value": 0.5})
+		elif o.occurrence_type == "Lateness":
+			out["late_minutes"] += flt(o.hours) * 60.0
+			out["detail"].append({"date": str(d), "kind": "late_minutes", "value": flt(o.hours) * 60.0})
+		else:                                   # Partial Absence, Early Exit
+			out["hours"] += flt(o.hours)
+			out["detail"].append({"date": str(d), "kind": "hours", "value": flt(o.hours)})
+	for d in sorted(att):
+		if d in covered or not att[d]:
+			continue
+		out["days"] += att[d]
+		out["detail"].append({"date": str(d), "kind": "day", "value": att[d]})
+	out["days"], out["hours"] = flt(out["days"], 4), flt(out["hours"], 2)
+	out["late_minutes"] = flt(out["late_minutes"], 2)
+	return out
+
+
+def engine_day_inputs(employee, start_date, end_date, validate_attendance=0, based_on_timesheet=0,
+                      total_working_days=None, payment_days=None, payment_days_override=0):
+	"""The day-related inputs of engine.compute_slip, built the same way for the salary
+	slip and the payroll preview so the two cannot disagree.
+
+	Attendance-based: the absences go to the engine as days / hours / minutes and the
+	paid days it receives equal the total (no proration on top of the priced absences).
+	A paid-days override by HR, or a timesheet-based slip, keeps the proportional paid ÷
+	total factor and passes no absences, so nothing is deducted twice.
+	"""
+	if total_working_days is None or payment_days is None:
+		total_working_days, payment_days = compute_working_days(
+			employee, start_date, end_date, validate_attendance=validate_attendance,
+			based_on_timesheet=based_on_timesheet)
+	out = {"total_working_days": flt(total_working_days), "payment_days": flt(payment_days),
+	       "engine_payment_days": flt(payment_days),
+	       "absent_days": 0.0, "absent_hours": 0.0, "late_minutes": 0.0, "detail": []}
+	if cint(validate_attendance) and not cint(based_on_timesheet) and not cint(payment_days_override):
+		a = absence_inputs(employee, start_date, end_date)
+		out.update(engine_payment_days=flt(total_working_days), absent_days=a["days"],
+		           absent_hours=a["hours"], late_minutes=a["late_minutes"], detail=a["detail"])
+	return out
+
+
+def attendance_overtime_hours(employee, start_date, end_date):
+	"""Approved overtime hours in a period: the sum of ``custom_overtime_hours`` on
+	submitted Attendance. Hours only. What they are worth is services/overtime.py, the
+	one overtime rule, priced per month on the basic salary."""
+	return flt(frappe.db.sql(
+		"""select sum(custom_overtime_hours) from `tabAttendance`
 		where employee=%s and docstatus=1 and ifnull(custom_overtime_hours,0) > 0
 		and attendance_date between %s and %s""",
-		(employee, getdate(start_date), getdate(end_date)), as_dict=True,
-	)
-	total = 0.0
-	for r in rows:
-		nh = shift_day_hours(shift, r.attendance_date) or _default_weekday_hours(r.attendance_date) or 8.0
-		total += (daily / nh) * mult * flt(r.custom_overtime_hours)
-	return flt(total, 2)
+		(employee, getdate(start_date), getdate(end_date)))[0][0], 2)

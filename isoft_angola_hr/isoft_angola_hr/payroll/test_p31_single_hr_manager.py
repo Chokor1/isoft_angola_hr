@@ -43,6 +43,8 @@ from isoft_angola_hr.isoft_angola_hr.services import (
 	permissions as perms,
 	salary_change,
 )
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 PT_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
 	os.path.abspath(__file__)))), "translations", "pt.csv")
@@ -85,11 +87,9 @@ class SingleManagerFixture(PayrollFixture):
 
 	def switch(self, field, value):
 		"""Set one separation switch for the duration of a test, then put it back."""
-		before = frappe.db.get_single_value("Isoft HR Settings", field)
-		frappe.db.set_single_value("Isoft HR Settings", field, value)
-		frappe.clear_cache()
 		self.addCleanup(frappe.clear_cache)
-		self.addCleanup(frappe.db.set_single_value, "Isoft HR Settings", field, before)
+		self.pin_settings(**{field: value})   # restores the stored row, or its absence
+		frappe.clear_cache()
 
 	def as_user(self, user):
 		self.addCleanup(frappe.set_user, frappe.session.user)
@@ -207,6 +207,11 @@ class TestAdvanceSelfApproval(SingleManagerFixture):
 # ---------------------------------------------------------------------------
 
 class TestSecuritySurvives(SingleManagerFixture):
+	def setUp(self):
+		super().setUp()
+		# These tests assert the documented approval policy, whatever the site runs.
+		self.pin_settings(**self.DOCUMENTED_APPROVAL_POLICY)
+
 	def test_6_a_role_without_the_capability_is_refused_even_with_separation_off(self):
 		"""The switch removes an identity comparison, not the permission model."""
 		self.switch("require_separate_contract_approval", 0)

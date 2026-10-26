@@ -24,6 +24,8 @@ import unittest
 import frappe
 
 from isoft_angola_hr.isoft_angola_hr import api, hr_api
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 CRASHES = (TypeError, AttributeError, KeyError, IndexError, ValueError,
            json.decoder.JSONDecodeError)

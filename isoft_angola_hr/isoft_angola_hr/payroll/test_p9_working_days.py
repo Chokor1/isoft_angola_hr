@@ -23,6 +23,8 @@ from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip
 	shift_day_hours,
 )
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 AUTO = "Auto (Holiday List)"
 CALENDAR = "Calendar Working Days"
@@ -152,10 +154,11 @@ class TestAbsenceIsCountedInTheSameUnit(WorkingDaysFixture):
 		self.assertEqual(twd, before_twd, "an absence must not change the total")
 		self.assertAlmostEqual(before_pay - pay, 1.0, places=6)
 
-	def test_a_short_saturday_costs_half_a_day_under_calendar(self):
-		# A short scheduled day is worth half a working day, so missing it costs 0.5.
-		# Asserted explicitly because it is a policy decision, not an accident: a full
-		# weekday is 1 whatever its clock length, a short Saturday is 0.5.
+	def test_an_absent_short_saturday_is_one_absence_under_calendar(self):
+		# HR's "Absence and Late Arrival Deductions" (October 2026) counts ABSENCES: a day
+		# the employee was due and did not come is one absence, worth 44/6 hours of the
+		# hourly wage, whatever that day's clock length. The short Saturday still counts
+		# 0.5 in the period total; as an absence it is 1. services/absences.py prices it.
 		self.use_basis(CALENDAR)
 		_, before_pay = compute_working_days(
 			self.shifted.name, self.start, self.end, validate_attendance=1)
@@ -163,9 +166,9 @@ class TestAbsenceIsCountedInTheSameUnit(WorkingDaysFixture):
 		_, pay = compute_working_days(
 			self.shifted.name, self.start, self.end, validate_attendance=1)
 
-		self.assertAlmostEqual(before_pay - pay, 0.5, places=6)
-
-	def test_a_short_saturday_costs_half_a_day_under_auto(self):
+		self.assertAlmostEqual(before_pay - pay, 1.0, places=6)
+	def test_an_absent_short_saturday_is_one_absence_under_auto_too(self):
+		# the basis changes how the total is counted, never what an absence is
 		self.use_basis(AUTO)
 		_, before_pay = compute_working_days(
 			self.shifted.name, self.start, self.end, validate_attendance=1)
@@ -173,9 +176,7 @@ class TestAbsenceIsCountedInTheSameUnit(WorkingDaysFixture):
 		_, pay = compute_working_days(
 			self.shifted.name, self.start, self.end, validate_attendance=1)
 
-		# 4h of an 8h standard day.
-		self.assertAlmostEqual(before_pay - pay, 0.5, places=6)
-
+		self.assertAlmostEqual(before_pay - pay, 1.0, places=6)
 	def test_fixed_basis_deducts_whole_days_not_hour_equivalents(self):
 		"""Regression: the total was a flat day count while the deduction stayed in
 		standard-day equivalents, so one absent day removed 1.1875 days from a 9.5h
@@ -269,7 +270,7 @@ class TestSaturdayAbsenceCase(WorkingDaysFixture):
 		doc.insert(ignore_permissions=True)
 		return doc
 
-	def test_full_day_saturday_absence_costs_half_a_day_under_calendar(self):
+	def test_full_day_saturday_absence_is_one_absence_under_calendar(self):
 		self.use_basis(CALENDAR)
 		sat = self._saturday_in_period()
 		self.assertGreater(shift_day_hours(self.shift.name, sat), 0,
@@ -284,12 +285,12 @@ class TestSaturdayAbsenceCase(WorkingDaysFixture):
 			self.shifted.name, self.start, self.end, validate_attendance=1)
 
 		self.assertEqual(twd, twd_before, "an absence must not change the total")
-		# the Saturday is a SHORT day, so a whole-day absence on it costs half a day
-		self.assertAlmostEqual(pay_before - pay, 0.5, places=6)
-
-	def test_the_same_absence_costs_half_a_day_under_the_old_basis(self):
-		# Kept as the counterpart: it documents exactly what changed and why the review
-		# saw a figure move.
+		# HR's document (October 2026): an unjustified day is one absence, short or not
+		self.assertAlmostEqual(pay_before - pay, 1.0, places=6)
+	def test_the_same_absence_is_one_absence_under_the_old_basis(self):
+		# Kept as the counterpart: the basis used to decide the weight of a Saturday
+		# absence (0.5 under Auto); since October 2026 the basis decides nothing about
+		# absences, so both bases agree.
 		self.use_basis(AUTO)
 		sat = self._saturday_in_period()
 		_, pay_before = compute_working_days(
@@ -298,27 +299,26 @@ class TestSaturdayAbsenceCase(WorkingDaysFixture):
 		_, pay = compute_working_days(
 			self.shifted.name, self.start, self.end, validate_attendance=1)
 
-		self.assertAlmostEqual(pay_before - pay, 0.5, places=6)
+		self.assertAlmostEqual(pay_before - pay, 1.0, places=6)
+	def test_the_pay_effect_is_one_absence_of_the_hourly_wage(self):
+		"""The money follows HR's rule, not the day count: one absence costs the hourly
+		wage (basic × 12 / 2288) × 44/6 hours, whatever the period's working days."""
+		from isoft_angola_hr.isoft_angola_hr.payroll import engine
+		from isoft_angola_hr.isoft_angola_hr.services import absences
 
-	def test_the_pay_effect_is_exactly_half_a_day_of_salary(self):
-		"""The money must follow the day count with no rounding drift.
-
-		The absence is on the short Saturday, which is worth half a working day, so the
-		pay lost is half a day's salary.
-		"""
 		self.use_basis(CALENDAR)
 		sat = self._saturday_in_period()
-		twd, pay_before = compute_working_days(
+		twd, _pay = compute_working_days(
 			self.shifted.name, self.start, self.end, validate_attendance=1)
 		self._occurrence(self.shifted.name, sat)
-		_, pay_after = compute_working_days(
-			self.shifted.name, self.start, self.end, validate_attendance=1)
-
-		base = flt(self.profile.base)
-		lost = base * (pay_before / twd) - base * (pay_after / twd)
-		self.assertAlmostEqual(lost, base * 0.5 / twd, places=6,
-		                       msg="a short-day absence must cost exactly half of base ÷ days")
-
+		full = engine.compute_slip(self.profile, {"total_working_days": twd, "payment_days": twd})
+		cut = engine.compute_slip(self.profile, {"total_working_days": twd, "payment_days": twd,
+		                                         "absent_days": 1})
+		line = lambda res: sum(e["amount"] for e in res["earnings"] if e["abbr"] == "SB")
+		lost = flt(line(full) - line(cut), 2)
+		self.assertEqual(lost, float(absences.basic_deduction(self.profile.base, 1)))
+		self.assertNotEqual(lost, flt(flt(self.profile.base) * 0.5 / twd, 2),
+		                    "base ÷ working days no longer prices an absence")
 	def test_a_justified_saturday_absence_costs_nothing(self):
 		self.use_basis(CALENDAR)
 		sat = self._saturday_in_period()

@@ -25,10 +25,13 @@ import frappe
 
 from isoft_angola_hr.isoft_angola_hr import api, hr_api
 from isoft_angola_hr.isoft_angola_hr.install import _has_perm
-from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import (
+	PREFIX, PayrollFixture, _stored_setting, _write_setting)
 from isoft_angola_hr.isoft_angola_hr.services import advances, contracts, salary_change
 from isoft_angola_hr.isoft_angola_hr.services import hr_operations as hr_ops
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 SWITCHES = (
 	"require_separate_contract_approval",
@@ -45,7 +48,9 @@ class HrManagerFixture(PayrollFixture):
 	def setUpClass(cls):
 		super().setUpClass()
 		frappe.set_user("Administrator")
-		cls._before = {f: frappe.db.get_single_value("Isoft HR Settings", f) for f in SWITCHES}
+		# the stored rows, not get_single_value(): that casts a missing Check to 0, and
+		# writing the 0 back turned an unset (safe-default) switch into an explicit OFF
+		cls._before = {f: _stored_setting(f) for f in SWITCHES}
 		cls.users = {}
 		for role in ("HR Manager", "HR User", "Payroll Finance Approver"):
 			email = "hrm.%s@example.invalid" % role.lower().replace(" ", "")
@@ -62,7 +67,7 @@ class HrManagerFixture(PayrollFixture):
 	def tearDownClass(cls):
 		frappe.set_user("Administrator")
 		for f, v in cls._before.items():
-			frappe.db.set_single_value("Isoft HR Settings", f, v)
+			_write_setting(f, v)
 		frappe.db.commit()
 		frappe.clear_cache()
 		super().tearDownClass()

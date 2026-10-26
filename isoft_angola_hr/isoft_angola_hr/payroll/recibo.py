@@ -25,7 +25,7 @@ whitelisted helpers, and multi-query logic in a template is unreadable and slow.
 
 import frappe
 from frappe import _
-from frappe.utils import cint, flt, formatdate, get_datetime, getdate
+from frappe.utils import cint, flt, formatdate, get_datetime, get_last_day, getdate
 
 # Component codes defined by the payroll engine (payroll/engine.py::COMPONENTS).
 # Mapped to the numeric codes Angolan payroll software conventionally prints. A code is
@@ -41,6 +41,9 @@ COMPONENT_CODES = {
 	"SNA": "R302",  # Subsídio de Natal
 	"PPD": "R401",  # Prémio de Produtividade
 	"HEX": "R501",  # Horas Extras
+	# Informative absence rows (engine FAL / ATR): what came off the basic salary.
+	"FAL": "F03",  # Faltas
+	"ATR": "F04",  # Atrasos
 	# Descontos. D01 and D40 are taken from the PRIMAVERA receipt this format replaces;
 	# the earlier D30/D40/D60 guesses printed the wrong code against every deduction.
 	"CTSS3": "D01",  # Segurança Social 3% (trabalhador)
@@ -75,6 +78,8 @@ COMPONENT_LABELS = {
 	"PPD": "Productivity Bonus",
 	"HEX": "Overtime",
 	"TI": "Taxable Income",
+	"FAL": "Absences",
+	"ATR": "Late Arrivals",
 	"CTSS3": "Employee INSS",
 	"IRT": "IRT",
 	"ADT": "Salary Advance",
@@ -308,11 +313,12 @@ def _faltas(doc):
 
 
 def _overtime(doc):
-	"""Approved overtime hours backing the Horas Extras line.
+	"""Overtime hours backing the Horas Extras line.
 
-	Hours come from submitted Attendance records (``custom_overtime_hours``) — the exact
-	same rows the engine used. The amount is the slip's stored ``overtime_amount``; it is
-	NOT recomputed here, and in particular is never derived from days-worked ÷ divisor.
+	The hours are the slip's own ``overtime_hours``, the figure the amount was calculated
+	from (services/overtime.py). The dated rows are the submitted Attendance records
+	carrying overtime in the period, listed for the record. The amount is the slip's
+	stored ``overtime_amount``: NOT recomputed here.
 	"""
 	amount = flt(doc.get("overtime_amount"))
 	enabled = cint(frappe.db.get_single_value("Isoft HR Settings", "enable_overtime"))
@@ -329,11 +335,13 @@ def _overtime(doc):
 		(doc.employee, getdate(doc.start_date), getdate(doc.end_date)),
 		as_dict=True,
 	)
-	hours = flt(sum(flt(r.hours) for r in rows), 2)
+	# A slip from before overtime was entered as hours has none: fall back to the dated
+	# Attendance rows, which is what those slips were printed with.
+	hours = flt(doc.get("overtime_hours"), 2) or flt(sum(flt(r.hours) for r in rows), 2)
 
 	# Nothing approved and nothing paid: suppress the whole block rather than print an
 	# empty table.
-	if not rows and not amount:
+	if not rows and not amount and not hours:
 		return {"show": False, "rows": [], "hours": 0.0, "amount": 0.0}
 
 	return {
@@ -484,22 +492,22 @@ def _days(doc, overtime):
 
 
 def _period_label(doc):
-	"""Localised period, e.g. "Julho 2026" / "July 2026" / "Junho/Julho 2026".
+	"""Localised period: the month the payroll period ends in, e.g. "Julho 2026" /
+	"July 2026". A 23 June - 22 July cycle is July's payroll, so only July is printed
+	(HR, October 2026; it used to read "Junho/Julho 2026").
 
 	Month names come from Babel through ``formatdate``, which reads the language of the
 	current request; ``_periodo`` above stays Portuguese for the older format.
 	"""
-	start, end = getdate(doc.start_date), getdate(doc.end_date)
+	end = getdate(doc.end_date)
+	name = formatdate(end, "MMMM")
+	return "{0} {1}".format(name[:1].upper() + name[1:], end.year)
 
-	def month(d):
-		name = formatdate(d, "MMMM")
-		return name[:1].upper() + name[1:]
 
-	if start.month == end.month and start.year == end.year:
-		return "{0} {1}".format(month(end), end.year)
-	if start.year == end.year:
-		return "{0}/{1} {2}".format(month(start), month(end), end.year)
-	return "{0} {1}/{2} {3}".format(month(start), start.year, month(end), end.year)
+def _issue_date(doc):
+	"""The receipt's issue date: the last day of the month the period ends in (HR,
+	October 2026), e.g. 31-07-2026 for a 23 June - 22 July period."""
+	return get_last_day(getdate(doc.end_date))
 
 
 def _company_logo(company):
@@ -640,6 +648,13 @@ def get_context(doc):
 
 	employee = _employee_info(doc.get("employee"))
 	overtime = _overtime(doc)
+	# The hours used to be printed in the Processing Information box, which HR removed
+	# (October 2026). The overtime line carries them instead, so the receipt still says
+	# how many hours were paid.
+	if overtime.get("show") and flt(overtime.get("hours")):
+		for line in earnings:
+			if line["code"] == _code_for("HEX"):
+				line["hours"] = flt(overtime.get("hours"))
 	irt_retido = _component_amount(doc.get("deductions"), IRT_ABBR) or flt(doc.get("irt_amount"))
 	inss_retido = (_component_amount(doc.get("deductions"), INSS_ABBR)
 	               or flt(doc.get("ss_employee_amount")))
@@ -651,6 +666,7 @@ def get_context(doc):
 		"document": doc.get("name"),
 		"payroll_reference": doc.get("payroll_entry"),
 		"period_label": _period_label(doc),
+		"issue_date": _issue_date(doc),
 		"days": _days(doc, overtime),
 		"payment": _payment(doc, employee, currency),
 		# Headline figures, each copied from the field the engine wrote.

@@ -153,8 +153,10 @@ def salary_slip_explanation(name):
 		        "Total Working Days.")
 	elif cint(doc.validate_attendance):
 		mode = _("Attendance Based")
-		how = _("Paid Days = Total Working Days less each unjustified absence, counted in "
-		        "the same unit as the total.")
+		how = _("Each absent day takes the hourly wage (basic salary × 12 ÷ 2288) × 7.33 h off "
+		        "the basic salary; absent hours take the hourly wage per hour; food and "
+		        "transport allowances are paid on 26 days less the absent days; late arrivals "
+		        "are deducted at the hourly wage per minute once 40 minutes accumulate.")
 	else:
 		mode = _("Full period")
 		how = _("Neither Attendance nor Timesheets reduce Paid Days on this slip, so the "
@@ -169,7 +171,24 @@ def salary_slip_explanation(name):
 	leave_days = recibo._leave_days(doc)
 
 	absent = flt(twd - paid, 4)
-	daily = flt(base / twd, 2) if base and twd else None
+	# The value of one absence under HR's rule (services/absences.py): hourly wage × 7,33 h
+	# on the CONTRACTUAL basic salary, not the SB line, which is already net of absences.
+	from isoft_angola_hr.isoft_angola_hr.services import absences as absence_rules
+	contractual = flt(frappe.db.get_value("Isoft Salary Profile", doc.salary_profile, "base")) if doc.salary_profile else 0.0
+	hourly = float(absence_rules.hourly_wage(contractual)) if contractual > 0 else 0.0
+	daily = float(absence_rules.basic_deduction(contractual, 1)) if contractual > 0 else None
+	absence_figures = {
+		"hourly_wage": hourly,
+		"daily_hours": absence_rules.DAILY_HOURS and float(round(absence_rules.DAILY_HOURS, 4)),
+		"per_absence": daily,
+		"absent_days": flt(doc.get("absent_days")),
+		"absent_hours": flt(doc.get("absent_hours")),
+		"late_minutes": flt(doc.get("late_minutes")),
+		"late_threshold": float(absence_rules.LATE_THRESHOLD_MINUTES),
+		"absence_deduction": flt(doc.get("absence_deduction")),
+		"late_deduction": flt(doc.get("late_deduction")),
+		"allowance_days": float(absence_rules.ALLOWANCE_DAYS),
+	}
 
 	return {
 		"name": doc.name,
@@ -194,11 +213,10 @@ def salary_slip_explanation(name):
 		"overtime_amount": flt(overtime.get("amount")),
 		"overtime_shown": bool(overtime.get("show")),
 		"base": base,
+		"absences": absence_figures,
 		"daily_value": daily,
 		"daily_value_formula": (
-			"{0} ÷ {1} = {2}".format(frappe.utils.fmt_money(base),
-			                         frappe.utils.fmt_money(twd),
-			                         frappe.utils.fmt_money(daily))
+			"{0} × 7,33 h = {1}".format(frappe.utils.fmt_money(hourly), frappe.utils.fmt_money(daily))
 			if daily else None),
 		"proration_factor": flt(doc.payment_factor) if doc.get("payment_factor") else (
 			flt(paid / twd, 6) if twd else None),

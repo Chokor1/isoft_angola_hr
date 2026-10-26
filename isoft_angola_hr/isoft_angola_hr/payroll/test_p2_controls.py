@@ -19,6 +19,8 @@ from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, 
 from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readiness
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 
 class ControlFixture(PayrollFixture):
@@ -214,6 +216,11 @@ class TestPayrollWorkflow(ControlFixture):
 # Segregation of duties
 # --------------------------------------------------------------------------- #
 class TestSegregationOfDuties(ControlFixture):
+	def setUp(self):
+		super().setUp()
+		# These tests assert the documented approval policy, whatever the site runs.
+		self.pin_settings(**self.DOCUMENTED_APPROVAL_POLICY)
+
 	def test_preparer_cannot_approve_own_payroll(self):
 		"""The core control of the phase: same person, both roles, still refused."""
 		entry = self.calculated_entry()
@@ -817,7 +824,7 @@ class TestComponentToggles(ControlFixture):
 		frappe.clear_cache(doctype="Isoft HR Settings")
 		try:
 			with self.assertRaises(frappe.ValidationError) as cm:
-				self.make_slip(submit=False, overtime_amount=50000)
+				self.make_slip(submit=False, overtime_hours=5)   # overtime is entered as hours
 			self.assertIn("Horas Extras", str(cm.exception))
 		finally:
 			frappe.db.set_value("Isoft HR Settings", "Isoft HR Settings", "enable_overtime", 1)
@@ -826,13 +833,16 @@ class TestComponentToggles(ControlFixture):
 	def test_an_unchanged_historical_amount_is_never_rewritten(self):
 		"""Switching a component off must not silently zero payroll that already carries
 		an amount — it governs what may be entered from now on."""
-		slip = self.make_slip(submit=False, overtime_amount=50000)
+		slip = self.make_slip(submit=False, overtime_hours=5)   # overtime is entered as hours
+		paid = flt(slip.overtime_amount)
+		self.assertGreater(paid, 0)
 		frappe.db.set_value("Isoft HR Settings", "Isoft HR Settings", "enable_overtime", 0)
 		frappe.clear_cache(doctype="Isoft HR Settings")
 		try:
 			slip.reload()
 			slip.save(ignore_permissions=True)
-			self.assertAlmostEqual(flt(slip.overtime_amount), 50000.00, places=2)
+			self.assertEqual(flt(slip.overtime_hours), 5)
+			self.assertAlmostEqual(flt(slip.overtime_amount), paid, places=2)
 		finally:
 			frappe.db.set_value("Isoft HR Settings", "Isoft HR Settings", "enable_overtime", 1)
 			frappe.clear_cache(doctype="Isoft HR Settings")

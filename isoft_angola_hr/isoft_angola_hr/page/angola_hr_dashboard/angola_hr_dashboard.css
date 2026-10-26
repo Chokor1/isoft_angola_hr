@@ -411,9 +411,16 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 .ahr-table tr.fs-total td { font-weight: 700; border-top: 2px solid var(--ahr-border-strong); background: var(--ahr-tint-2); }
 .ahr-table input.input-xs { padding: 4px 6px; font-size: 12px; border-radius: 6px; text-align: right; max-width: 110px; border: 1px solid var(--ahr-border-strong); background: var(--ahr-card); color: var(--ahr-ink); }
 
-/* Keep the Bulk Allocation controls (incl. the Leave Type autocomplete) above the table */
-.ba-head { position: relative; z-index: 20; }
-.ba-head .awesomplete ul { z-index: 30; }
+/* Autocomplete lists must paint above everything that follows them in the
+ * content. Tables are wrapped in .ahr-tablewrap at render time and their
+ * header becomes sticky at z-index 3; the awesomplete list is z-index 1 in
+ * Frappe's own CSS, so a Link field placed above a table (Bulk Contract
+ * Creation, Bulk Allocation, Offboarding, ...) had its list cut through by the
+ * header. Two rules, so it holds wherever a control is placed:
+ *   - every filter bar is its own layer above tables and toolbars;
+ *   - the list itself outranks any sticky header inside the console. */
+.ahr-filters, .ba-head { position: relative; z-index: 20; }
+.ahr-shell .awesomplete > ul { z-index: 40; }
 
 /* ---- Payroll preview (scrollable) ---- */
 .pv-search-wrap { margin-bottom: 10px; }
@@ -427,6 +434,18 @@ body.ahr-fullscreen .ahr-shell { min-height: calc(100vh - 30px); }
 .pv-table .pv-ferias-lbl { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; margin: 0; justify-content: flex-end; }
 .pv-table .pv-ferias-amt { font-variant-numeric: tabular-nums; }
 .pv-table .pv-natal { max-width: 110px; text-align: right; }
+/* Editable amounts (Overtime, Bonus, Advance, Natal). Nothing gave these inputs a
+ * width of their own, so each column shrank to its header (44px for BONUS) and the
+ * number spinner hid everything past three digits. A minimum width lets the column
+ * grow to show 12500.50 whole, spinner included; the box sits right, under the
+ * right-aligned header. */
+.pv-table input.pv-f, .pv-table input.pv-natal {
+	display: block; min-width: 96px; width: 100%; max-width: 120px; height: 30px;
+	margin-left: auto; padding: 4px 8px; font-size: 13px; text-align: right;
+}
+/* The overtime amount and its art. 188.º split, calculated by the server from the hours
+ * typed above it. */
+.pv-table .pv-ot-amt { margin-top: 3px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .pv-table tr.pv-off { opacity: .42; }
 .pv-table tr.pv-off input.pv-f { background: var(--ahr-tint); }
 
@@ -626,6 +645,9 @@ details.ahr-callout > summary:hover { background: var(--ahr-tint-2); border-radi
 	background: var(--ahr-card); cursor: pointer;
 }
 .ahr-check input { margin: 0; }
+/* Several checkboxes that belong together wrap as one unit rather than one at
+ * a time across rows (Bulk Contracts: Open-ended / joining date / documents). */
+.ahr-check-group { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; align-self: flex-end; }
 
 /* Organisation chart — an indented tree rather than a canvas drawing. It stays
    readable at 200 people, prints, and needs no charting library. */

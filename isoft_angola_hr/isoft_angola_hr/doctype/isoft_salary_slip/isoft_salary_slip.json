@@ -22,6 +22,7 @@
   "currency",
   "inputs_section",
   "productivity_bonus",
+  "overtime_hours",
   "overtime_amount",
   "subsidio_ferias",
   "column_break_17",
@@ -34,6 +35,13 @@
   "column_break_21",
   "payment_days",
   "payment_days_override",
+  "absences_section",
+  "absent_days",
+  "absent_hours",
+  "late_minutes",
+  "column_break_absences",
+  "absence_deduction",
+  "late_deduction",
   "earnings_section",
   "earnings",
   "deductions_section",
@@ -166,9 +174,17 @@
    "label": "Prémio de Produtividade"
   },
   {
+   "description": "Overtime hours worked in the month. The amount is calculated from them: Lei 12/23 art. 237.º n.º 7 (SH = salário-base × 12 / (52 × 44)) and art. 188.º (first 30 h at 100%, the rest at 75%).",
+   "fieldname": "overtime_hours",
+   "fieldtype": "Float",
+   "label": "Horas Extras (horas)"
+  },
+  {
+   "description": "Calculated from the overtime hours. Not typed.",
    "fieldname": "overtime_amount",
    "fieldtype": "Currency",
-   "label": "Horas Extras"
+   "label": "Horas Extras",
+   "read_only": 1
   },
   {
    "fieldname": "subsidio_ferias",
@@ -227,6 +243,53 @@
    "label": "Payment Days Overridden",
    "default": "0",
    "description": "Tick to stop payroll recalculating Payment Days from attendance. Leave unticked so attendance corrections always flow through."
+  },
+  {
+   "fieldname": "absences_section",
+   "fieldtype": "Section Break",
+   "label": "Absences and Late Arrivals",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "absent_days",
+   "fieldtype": "Float",
+   "label": "Absent Days",
+   "read_only": 1,
+   "description": "Absent / unjustified full days (1) and half days (0.5) in the period, from Attendance and Attendance Occurrences."
+  },
+  {
+   "fieldname": "absent_hours",
+   "fieldtype": "Float",
+   "label": "Absent Hours",
+   "read_only": 1,
+   "description": "Unjustified partial absences and early exits, in hours."
+  },
+  {
+   "fieldname": "late_minutes",
+   "fieldtype": "Float",
+   "label": "Late Minutes",
+   "read_only": 1,
+   "description": "Unjustified lateness accumulated in the period. Deducted from 40 minutes on."
+  },
+  {
+   "fieldname": "column_break_absences",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "absence_deduction",
+   "fieldtype": "Currency",
+   "label": "Absence Deduction",
+   "options": "currency",
+   "read_only": 1,
+   "description": "Hourly wage (basic × 12 ÷ 2288) × 7.33 h per absent day, plus absent hours at the hourly wage. Taken off the basic salary."
+  },
+  {
+   "fieldname": "late_deduction",
+   "fieldtype": "Currency",
+   "label": "Late Arrival Deduction",
+   "options": "currency",
+   "read_only": 1,
+   "description": "Hourly wage × late minutes ÷ 60, only when 40 minutes or more accumulated. Taken off the basic salary."
   },
   {
    "fieldname": "earnings_section",
@@ -452,7 +515,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-08 10:00:00.000000",
+ "modified": "2026-10-26 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Isoft Angola HR",
  "name": "Isoft Salary Slip",

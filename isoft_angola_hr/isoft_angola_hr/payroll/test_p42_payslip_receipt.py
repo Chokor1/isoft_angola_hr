@@ -34,15 +34,23 @@ from frappe.utils import (add_days, add_months, flt, get_first_day, get_last_day
 from isoft_angola_hr.isoft_angola_hr import install
 from isoft_angola_hr.isoft_angola_hr.payroll import engine, recibo
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 FORMAT = "Recibo de Vencimento"
 CTX = recibo.TRANSLATION_CONTEXT
 
-try:  # PyMuPDF is optional: page text is only checked when it is installed.
+try:  # Page text comes from PyMuPDF when installed, otherwise from pdfminer.six
 	import fitz  # noqa: F401
 	HAS_FITZ = True
 except ImportError:
 	HAS_FITZ = False
+try:  # pdfminer.six ships in the bench environment, so the page check really runs
+	import pdfminer.high_level  # noqa: F401
+	HAS_PDFMINER = True
+except ImportError:
+	HAS_PDFMINER = False
+HAS_PAGE_TEXT = HAS_FITZ or HAS_PDFMINER
 
 
 class _Lang:
@@ -90,11 +98,19 @@ def pdf_info(pdf):
 
 
 def pdf_page_texts(pdf):
-	"""Text of every page (PyMuPDF). PyPDF2 1.x cannot read wkhtmltopdf's fonts."""
-	import fitz
+	"""Text of every page. PyPDF2 1.x cannot read wkhtmltopdf's fonts; PyMuPDF and
+	pdfminer.six both can, and either one is enough."""
+	if HAS_FITZ:
+		import fitz
 
-	doc = fitz.open(stream=pdf, filetype="pdf")
-	return [re.sub(r"\s+", " ", page.get_text()) for page in doc]
+		doc = fitz.open(stream=pdf, filetype="pdf")
+		return [re.sub(r"\s+", " ", page.get_text()) for page in doc]
+	from pdfminer.high_level import extract_text
+	from pdfminer.pdfpage import PDFPage
+
+	count = sum(1 for _page in PDFPage.get_pages(io.BytesIO(pdf)))
+	return [re.sub(r"\s+", " ", extract_text(io.BytesIO(pdf), page_numbers=[i]))
+	        for i in range(count)]
 
 
 def money(v):
@@ -238,7 +254,7 @@ class ReceiptFixture(PayrollFixture):
 		the slip refuse to save, which would be a settings failure, not a receipt one."""
 		settings = engine.get_settings()
 		out = {}
-		for field, abbr in (("productivity_bonus", "PPD"), ("overtime_amount", "HEX"),
+		for field, abbr in (("productivity_bonus", "PPD"), ("overtime_hours", "HEX"),
 		                    ("adiantamento", "ADT"), ("subsidio_ferias", "SFE"),
 		                    ("subsidio_natal", "SNA")):
 			if field in amounts and engine.component_enabled(settings, abbr):
@@ -262,7 +278,62 @@ class ReceiptFixture(PayrollFixture):
 		self._attendance(self.employee.name, self.weekday(11), "On Leave",
 		                 leave_type=leave_type[0] if leave_type else None)
 		return self.make_slip(submit=True, validate_attendance=1,
-		                      **self.enabled_inputs(productivity_bonus=25000, overtime_amount=18000))
+		                      # overtime is entered as hours: the 3 + 2.5 approved above
+		                      **self.enabled_inputs(productivity_bonus=25000, overtime_hours=5.5))
+
+
+# --------------------------------------------------------------------------- #
+# HR review of October 2026: the month, the issue date and a full page per copy
+# --------------------------------------------------------------------------- #
+class TestReceiptOctoberReview(ReceiptFixture):
+	"""A 23 June - 22 July cycle is July's payroll: Period "July 2026" (not "June/July"),
+	Issue Date 31-07-2026, no Processing Information box, and each copy fills its page."""
+
+	@staticmethod
+	def period(start, end):
+		return frappe._dict(start_date=start, end_date=end)
+
+	def test_the_period_is_the_month_the_period_ends_in(self):
+		cycle = self.period("2026-06-23", "2026-07-22")
+		with _Lang("en"):
+			self.assertEqual(recibo._period_label(cycle), "July 2026")
+		with _Lang("pt"):
+			self.assertEqual(recibo._period_label(cycle), "Julho 2026")
+		with _Lang("en"):
+			self.assertEqual(recibo._period_label(self.period("2026-12-23", "2027-01-22")), "January 2027")
+			self.assertEqual(recibo._period_label(self.period("2026-07-01", "2026-07-31")), "July 2026")
+
+	def test_the_issue_date_is_the_last_day_of_that_month(self):
+		for start, end, expected in (("2026-06-23", "2026-07-22", "2026-07-31"),
+		                             ("2026-11-23", "2026-12-22", "2026-12-31"),
+		                             ("2028-01-23", "2028-02-22", "2028-02-29"),
+		                             ("2026-07-01", "2026-07-31", "2026-07-31")):
+			self.assertEqual(recibo._issue_date(self.period(start, end)), getdate(expected), end)
+
+	def test_the_receipt_prints_them(self):
+		slip = self.full_slip()
+		with _Lang("en"):
+			ctx = recibo.get_context(slip)
+		text = text_of(render(slip.name, lang="en"))
+		self.assertIn(ctx["period_label"], text)
+		self.assertNotIn("/", ctx["period_label"])
+		self.assertIn(frappe.utils.formatdate(get_last_day(slip.end_date)), text)
+
+	def test_overtime_hours_are_printed_on_the_overtime_line(self):
+		"""They used to be in the Processing Information box."""
+		slip = self.full_slip()
+		if not flt(slip.overtime_hours):
+			self.skipTest("overtime is switched off on this site")
+		printed = frappe.utils.fmt_money(recibo.get_context(slip)["overtime"]["hours"], 2)
+		printed = printed[:-3] if printed[-2:] == "00" else printed      # the template's qty()
+		self.assertIn("(%s h)" % printed, text_of(render(slip.name, lang="pt")))
+
+	def test_each_copy_is_one_full_page(self):
+		slip = self.full_slip()
+		html = render(slip.name, lang="pt")
+		self.assertEqual(html.count('class="rv-page"'), 2, "one full-page table per copy")
+		css = frappe.db.get_value("Print Format", FORMAT, "css")
+		self.assertRegex(css, r"\.rv \.rv-page \{[^}]*height:\s*\d+mm", "the copy has a fixed page height")
 
 
 # --------------------------------------------------------------------------- #
@@ -297,7 +368,6 @@ class TestReceiptContent(ReceiptFixture):
 		self.assertIn(money(slip.taxable_income), text)
 		self.assertIn(money(slip.total_deduction), text)
 		self.assertIn(money(slip.net_pay), text)
-		self.assertIn("Dias Pagos", text)
 		self.assertIn("Total a Receber".upper(), text.upper())
 
 	def test_the_elements_hr_asked_to_remove_are_not_printed(self):
@@ -315,7 +385,10 @@ class TestReceiptContent(ReceiptFixture):
 			self.assertNotIn(self._employment_type(), text)
 			self.assertNotIn(frappe.utils.formatdate(self.employee.date_of_joining), text)
 			for label in ("Tipo de Contrato", "Employment Type", "Data de Admissão", "Admission Date",
-			              "Período de Processamento", "Payroll Period", "Salário Bruto", "Gross Salary"):
+			              "Período de Processamento", "Payroll Period", "Salário Bruto", "Gross Salary",
+			              # HR review of October 2026: no Processing Information box
+			              "Informação de Processamento", "Processing Information",
+			              "Dias Pagos", "Paid Days", "Total Working Days", "Absence Days"):
 				self.assertNotIn(label, text, label)
 			# the deductions table (its section title and its D-codes) is gone; the summary stays
 			self.assertNotIn('rv-sec-title">Descontos<', html)
@@ -482,7 +555,7 @@ class TestReceiptPdf(ReceiptFixture):
 		self.assertEqual(pages, 2, "ORIGINAL on page 1, DUPLICADO on page 2")
 		self.assertEqual(sizes, [(595, 842), (595, 842)])
 
-	@unittest.skipUnless(HAS_FITZ, "PyMuPDF not installed")
+	@unittest.skipUnless(HAS_PAGE_TEXT, "neither PyMuPDF nor pdfminer.six is installed")
 	def test_pdf_pages_carry_the_same_payroll_data(self):
 		slip = self.full_slip()
 		pages = pdf_page_texts(render(slip.name, lang="pt", as_pdf=True))
@@ -500,7 +573,7 @@ class TestReceiptPdf(ReceiptFixture):
 		seven-figure salary, every optional earning, several deductions and two
 		informative rows. Nothing may be clipped and each copy must stay on one page."""
 		slip = self.make_slip_for(self.employee_b, self.profile_b, **self.enabled_inputs(
-			productivity_bonus=1234567.89, overtime_amount=987654.32,
+			productivity_bonus=1234567.89, overtime_hours=200,
 			subsidio_ferias=6172839.45, subsidio_natal=6172839.45, adiantamento=250000))
 		for name, abbr, amount in (("Quota Sindical", "QS", 12345.67),
 		                           ("Penhora Judicial", "PJ", 98765.43)):
@@ -530,9 +603,13 @@ class TestReceiptPdf(ReceiptFixture):
 			pages, sizes = pdf_info(pdf)
 			self.assertEqual(pages, 2, "%s: a copy overflowed its page" % lang)
 			self.assertEqual(sizes, [(595, 842), (595, 842)])
-			if HAS_FITZ:
+			if HAS_PAGE_TEXT:
+				# Each copy prints the same thing as the HTML above: no itemised deductions
+				# (HR review), their total, the net and the full name. This block only ran
+				# with PyMuPDF and still expected the itemised deduction the format dropped.
 				for page in pdf_page_texts(pdf):
-					self.assertIn("Penhora Judicial", page)
+					self.assertNotIn("Penhora Judicial", page)
+					self.assertIn(money(slip.total_deduction), page)
 					self.assertIn(money(slip.net_pay), page)
 					self.assertIn("Guimarães Júnior", page)
 

@@ -42,6 +42,8 @@ from isoft_angola_hr.isoft_angola_hr.payroll import engine, settlement as fs
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p3_hr import HRFixture
 from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 #: The screenshot that opened this phase, as an isolated scenario.
 SCREENSHOT = {
@@ -755,20 +757,17 @@ class TestSettlementOvertime(SettlementFixture):
 		self.assertEqual(ot["days"], 2)
 		self.assertGreater(ot["amount"], 0)
 
-	def test_the_hourly_value_uses_a_whole_month_not_the_unpaid_window(self):
+	def test_the_hourly_value_never_comes_from_the_unpaid_window(self):
 		"""Regression: pricing overtime off a three-day window made one hour of overtime
-		worth about eight times a full day's pay."""
+		worth about eight times a full day's pay. The hourly wage is now the statutory
+		basic × 12 / (52 × 44) (art. 237.º n.º 7), whatever the window."""
 		self._set_overtime(True)
 		term = getdate(frappe.utils.nowdate())
 		self._overtime_attendance(self.employee.name, [(add_days(term, -2), 4.0)])
 		ot = self._window(self.employee.name, term)
 
-		# The divisor must be a month's working days, not the 6-day window.
-		self.assertGreater(ot["rate_working_days"], 15,
-		                   "the rate basis must be a whole payroll period")
-		implied_hourly = ot["amount"] / (ot["hours"] * ot["multiplier"])
-		self.assertLess(implied_hourly, 200000.0 / 15 / 4,
-		                "an overtime hour cannot approach a day's pay")
+		self.assertEqual(ot["hourly_wage"], 1048.95, "200 000 × 12 / (52 × 44)")
+		self.assertEqual(ot["amount"], 4195.80, "4 h at 100%")
 
 	def test_disabled_overtime_pays_nothing_but_warns_loudly(self):
 		self._set_overtime(False)

@@ -18,6 +18,8 @@ from isoft_angola_hr.isoft_angola_hr.services import payroll_reconciliation as r
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import production_readiness as pr
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 
 # --------------------------------------------------------------------------- #

@@ -22,6 +22,8 @@ from isoft_angola_hr.isoft_angola_hr.services import employee_self_service as es
 from isoft_angola_hr.isoft_angola_hr.services import manager_self_service as mss
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import salary_change as sc
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 def _separation_required(test, module, attr="requires_separate_approval"):
 	"""Pin the segregation switch this test is about, without touching the database.

@@ -36,6 +36,8 @@ from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip
 	shift_full_day_hours,
 )
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 #: 23 Jul - 22 Aug 2026: 22 weekdays, 5 Saturdays, 4 Sundays, no holidays.
 START, END = "2026-07-23", "2026-08-22"
@@ -226,14 +228,15 @@ class TestAttendanceDeductsInDays(CalendarDaysFixture):
 		self.assertEqual(twd - paid, 1.0)
 		self.assertEqual(paid, PERIOD_DAYS - 1.0)
 
-	def test_one_absent_saturday_costs_half_a_day(self):
+	def test_one_absent_saturday_is_one_absence(self):
+		# the short Saturday counts 0.5 in the total; missing it is one absence (HR's
+		# "Absence and Late Arrival Deductions", October 2026)
 		self.on_shift(SHIFT_95)
 		self._mark("2026-08-01", "Absent")          # a Saturday
 		twd, paid = compute_working_days(self.employee.name, START, END,
 		                                 validate_attendance=1)
-		self.assertEqual(twd - paid, 0.5)
-		self.assertEqual(paid, PERIOD_DAYS - 0.5)
-
+		self.assertEqual(twd - paid, 1.0)
+		self.assertEqual(paid, PERIOD_DAYS - 1.0)
 	def test_a_half_day_on_a_weekday_costs_half_a_day(self):
 		self.on_shift(SHIFT_95)
 		self._mark("2026-07-28", "Half Day")

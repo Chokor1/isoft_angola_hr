@@ -150,7 +150,7 @@ class IsoftPayrollEntry(Document):
 				"payroll_entry": self.name,
 				"salary_profile": row.salary_profile,
 				"productivity_bonus": flt(row.productivity_bonus),
-				"overtime_amount": flt(row.overtime_amount),
+				"overtime_hours": row.overtime_hours,
 				"adiantamento": flt(row.adiantamento),
 				"subsidio_ferias": flt(row.subsidio_ferias),
 				"subsidio_natal": flt(row.subsidio_natal),
@@ -159,6 +159,7 @@ class IsoftPayrollEntry(Document):
 			})
 			slip.insert(ignore_permissions=True)
 			row.salary_slip = slip.name
+			row.overtime_amount = slip.overtime_amount   # calculated from the hours
 			created += 1
 		self.salary_slips_created = 1
 		self.update_totals()

@@ -26,6 +26,7 @@ from isoft_angola_hr.isoft_angola_hr.doctype.isoft_statutory_rate.isoft_statutor
 	get_statutory_rates,
 	require_rate,
 )
+from isoft_angola_hr.isoft_angola_hr.services import absences, overtime
 
 
 # Standard component catalogue (fixed in the app, configurable via Settings).
@@ -46,6 +47,10 @@ COMPONENTS = {
 	"PPD": {"name": "Prémio de Produtividade", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"HEX": {"name": "Horas Extras", "kind": "earning", "in_gross": True, "ss_base": True, "prorate": False},
 	"TI": {"name": "Rendimento Tributável", "kind": "earning", "in_gross": False, "ss_base": False, "prorate": False},
+	# Informative rows: what absences and late arrivals took off the basic salary
+	# (services/absences.py). Already reflected in SB, so never in gross or the ledger.
+	"FAL": {"name": "Faltas", "kind": "earning", "in_gross": False, "ss_base": False, "prorate": False},
+	"ATR": {"name": "Atrasos", "kind": "earning", "in_gross": False, "ss_base": False, "prorate": False},
 	"CTSS3": {"name": "Segurança Social 3%", "kind": "deduction", "prorate": False},
 	"IRT": {"name": "IRT", "kind": "deduction", "prorate": False},
 	"ADT": {"name": "Adiantamento", "kind": "deduction", "prorate": False},
@@ -288,8 +293,10 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 
 	:param profile: dict-like with base, food_allowance, transport_allowance,
 	        family_allowance, company, irt_table (optional)
-	:param inputs: dict with productivity_bonus, overtime_amount, adiantamento,
-	        advance_recovery, payment_days, total_working_days
+	:param inputs: dict with productivity_bonus, overtime_hours, adiantamento,
+	        advance_recovery, payment_days, total_working_days. Overtime is HOURS: the
+	        amount is always services/overtime.py on the profile's basic salary, never
+	        an amount handed in
 	:param irt_table: an already-loaded IRT Table document; resolved by effective date
 	        when omitted
 	:param rates: an already-resolved statutory rate set; resolved by effective date
@@ -318,17 +325,38 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 	factor = pay_days / total_days
 
 	# --- Earnings ---
-	sb = flt(get("base") * factor, 2)
-	sda = flt(get("food_allowance") * factor, 2)
-	sdt = flt(get("transport_allowance") * factor, 2)
+	# Absences and late arrivals are priced by services/absences.py (HR's document of
+	# October 2026): a fixed amount per absence off the basic salary, the allowances paid
+	# on 26 days, lateness from 40 accumulated minutes. The period's working days no
+	# longer price an absence; the proration factor survives for the one thing it still
+	# means, a paid-days override entered by HR, whose caller then passes no absences.
 	# Abono de Família is the one optional component that comes from the salary profile
 	# rather than from a monthly input, so the Settings toggle is applied here. The
 	# input-driven components (bonus, overtime, advance, férias, natal) are gated on the
 	# Salary Slip instead, where an existing amount can be reported rather than silently
 	# dropped — see IsoftSalarySlip.validate_enabled_components.
-	af = flt(get("family_allowance") * factor, 2) if component_enabled(s, "AF") else 0.0
+	abs_ = absences.calculate(
+		get("base"), inputs.get("absent_days"), inputs.get("absent_hours"), inputs.get("late_minutes"),
+		allowances={
+			"SDA": flt(get("food_allowance") * factor, 2),
+			"SDT": flt(get("transport_allowance") * factor, 2),
+			"AF": flt(get("family_allowance") * factor, 2) if component_enabled(s, "AF") else 0.0,
+		}, who=employee)
+	sb = flt(max(0.0, flt(get("base") * factor, 2) - abs_["total_deduction"]), 2)
+	sda = abs_["allowances"]["SDA"]["payable"]
+	sdt = abs_["allowances"]["SDT"]["payable"]
+	af = abs_["allowances"]["AF"]["payable"]
 	ppd = flt(inputs.get("productivity_bonus"))
-	hex_ = flt(inputs.get("overtime_amount"))
+	# Horas Extras: the month's hours priced by the one overtime rule (Art. 237.º n.º 7 /
+	# 188.º) on the FULL contractual basic salary, not the prorated SB line. An amount
+	# handed in instead is refused: it is how overtime used to bypass the formula, and
+	# silently ignoring it would drop pay a stale screen thought it had entered.
+	if flt(inputs.get("overtime_amount")):
+		frappe.throw(_("Overtime is calculated from overtime HOURS (Art. 237.º n.º 7 / 188.º); "
+		               "an overtime amount cannot be entered. Reload the page and enter hours."),
+		             title=_("Overtime Hours Required"))
+	ot = overtime.calculate_overtime(get("base"), inputs.get("overtime_hours"), who=employee)
+	hex_ = ot["total"]
 
 	# Vacation (VA / Subsídio de Férias) and Christmas (CA / Subsídio de Natal) are
 	# per-employee amounts decided in the payroll run (see api.payroll_preview for the
@@ -393,6 +421,8 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 	add_e("PPD", ppd)
 	add_e("HEX", hex_)
 	add_e("TI", taxable_income)  # statistical, excluded from gross
+	add_e("FAL", abs_["absence_deduction"])   # informative: already taken off SB
+	add_e("ATR", abs_["late_deduction"])
 
 	deductions = []
 	def add_d(abbr, amount):
@@ -417,6 +447,8 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 	return {
 		"earnings": earnings,
 		"deductions": deductions,
+		"overtime": ot,
+		"absences": abs_,
 		"gross_pay": gross_pay,
 		"total_deduction": total_deduction,
 		"net_pay": net_pay,

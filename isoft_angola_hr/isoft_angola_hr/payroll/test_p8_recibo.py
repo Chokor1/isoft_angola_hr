@@ -26,6 +26,8 @@ from frappe.utils import add_days, add_months, flt, get_first_day, get_last_day,
 
 from isoft_angola_hr.isoft_angola_hr.payroll import recibo
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 FORMAT_NAME = "Recibo de Vencimentos - Angola"
 
@@ -142,7 +144,8 @@ class ReciboFixture(PayrollFixture):
 		return self.make_slip(
 			submit=True,
 			productivity_bonus=25000,
-			overtime_amount=18000,
+			# overtime is entered as hours: the approved Attendance hours above
+			overtime_hours=sum(self.ot_hours.values()),
 		)
 
 
@@ -306,19 +309,20 @@ class TestReciboOvertime(ReciboFixture):
 		ctx = recibo.get_context(slip)
 		self.assertAlmostEqual(ctx["overtime"]["amount"], flt(slip.overtime_amount), places=2)
 
-	def test_hours_print_as_a_dash_when_no_approved_record_backs_the_amount(self):
-		# Overtime paid with no approved Attendance behind it: the amount is still owed
-		# and must print, but "0" hours beside a real value reads as a broken document.
-		slip = self.make_slip(submit=True, overtime_amount=18000)
+	def test_hours_entered_without_attendance_rows_print_the_slip_hours(self):
+		# Overtime is entered as hours on the run, so an amount always has hours behind it.
+		# With no dated Attendance rows the total line prints those hours, never a dash.
+		slip = self.make_slip(submit=True, overtime_hours=6)
 		ctx = recibo.get_context(slip)
 
 		self.assertTrue(ctx["overtime"]["show"], "a paid amount must still be shown")
-		self.assertEqual(ctx["overtime"]["rows"], [], "nothing was approved")
-		self.assertEqual(ctx["overtime"]["hours"], 0)
+		self.assertEqual(ctx["overtime"]["rows"], [], "no dated Attendance rows")
+		self.assertEqual(ctx["overtime"]["hours"], 6)
+		self.assertAlmostEqual(ctx["overtime"]["amount"], flt(slip.overtime_amount), places=2)
 
 		block = re.search(r"(?s)Horas Extraordin\u00e1rias.*?</table>", _render(slip.name))
 		self.assertIsNotNone(block, "the overtime table must be rendered")
-		self.assertIn("\u2014", frappe.utils.html_utils.unescape_html(block.group(0)))
+		self.assertNotIn("\u2014", frappe.utils.html_utils.unescape_html(block.group(0)))
 
 	def test_overtime_block_is_suppressed_when_there_is_none(self):
 		slip = self.make_slip(submit=True)          # no attendance, no overtime amount

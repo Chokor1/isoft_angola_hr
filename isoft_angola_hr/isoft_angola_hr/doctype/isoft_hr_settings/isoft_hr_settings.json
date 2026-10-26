@@ -134,10 +134,12 @@
   },
   {
    "default": "2",
+   "description": "Deprecated (October 2026) and ignored. Overtime is fixed by Lei 12/23 art. 237.º n.º 7 and 188.º: hourly wage = basic salary × 12 ÷ (52 × 44); the first 30 hours of the month at 100%, the rest at 75% (services/overtime.py). Kept only so stored settings load unchanged.",
    "fieldname": "overtime_multiplier",
    "fieldtype": "Float",
-   "label": "Overtime Multiplier",
-   "description": "Overtime = (daily salary ÷ normal daily hours) × this factor × overtime hours. Default 2×."
+   "hidden": 1,
+   "label": "Overtime Multiplier (deprecated, not used)",
+   "read_only": 1
   },
   {
    "default": "Auto (Holiday List)",
@@ -417,7 +419,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-09-08 12:00:00.000000",
+ "modified": "2026-10-14 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Isoft Angola HR",
  "name": "Isoft HR Settings",

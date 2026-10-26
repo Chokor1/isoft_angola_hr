@@ -28,6 +28,8 @@ from isoft_angola_hr.isoft_angola_hr.payroll import engine
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import (PREFIX,
                                                                         PayrollFixture)
 from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readiness
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 #: docs/ lives at the repository root, four levels above this module.
 DOC = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(

@@ -238,17 +238,18 @@ def collect_unpaid_overtime(employee, company, base, period_start, termination_d
 
 	"Approved" means a SUBMITTED Attendance record carrying overtime hours: exactly the
 	same source the monthly payroll uses. "Unpaid" means dated after the last submitted
-	salary slip, because that slip already paid everything up to its end date. Overtime is
-	never inferred from days-worked against a divisor — that arithmetic says nothing about
-	whether anybody actually worked extra hours, and it is not used here or anywhere else.
+	salary slip, because that slip already paid everything up to its end date.
+
+	Priced by services/overtime.py, the rule monthly payroll uses (Art. 237.º n.º 7 /
+	188.º). The 30-hour threshold is MONTHLY, so the hours are grouped by payroll period
+	and each period is priced on its own; a window that spans two periods is never priced
+	as one month.
 	"""
-	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
-		attendance_overtime_amount, compute_working_days,
-	)
+	from isoft_angola_hr.isoft_angola_hr.api import _cycle_period
+	from isoft_angola_hr.isoft_angola_hr.services import overtime
 
 	settings = frappe.get_cached_doc("Isoft HR Settings")
 	enabled = cint(settings.get("enable_overtime"))
-	multiplier = flt(settings.get("overtime_multiplier")) or 2.0
 	term = getdate(termination_date)
 
 	# Everything the last submitted slip covered is already paid for.
@@ -269,32 +270,27 @@ def collect_unpaid_overtime(employee, company, base, period_start, termination_d
 		(employee, start, term), as_dict=True)
 
 	hours = flt(sum(flt(r.hours) for r in rows), 2)
-	amount = 0.0
-	rate_days = 0.0
+	months, amount = [], 0.0
 	if hours and enabled:
-		# The daily rate must come from a WHOLE payroll period, never from the unpaid
-		# window. The window can be three days long, and base ÷ 3 would price an hour of
-		# overtime at about eight times a full day's pay. attendance_overtime_amount takes
-		# the rate basis and the hours window as separate arguments precisely so they can
-		# differ: the divisor is the month containing the termination, the rows are the
-		# unpaid window.
-		from isoft_angola_hr.isoft_angola_hr.api import _cycle_period
-
-		p_start, p_end = _cycle_period(term)
-		rate_days, _pay = compute_working_days(employee, p_start, p_end)
-		amount = flt(attendance_overtime_amount(
-			employee, base, rate_days, start, term, multiplier), 2)
+		by_period = {}
+		for r in rows:
+			by_period.setdefault(_cycle_period(r.attendance_date), 0.0)
+			by_period[_cycle_period(r.attendance_date)] += flt(r.hours)
+		for (p_start, p_end), period_hours in sorted(by_period.items()):
+			calc = overtime.calculate_overtime(base, flt(period_hours, 2))
+			calc.update(period_start=str(p_start), period_end=str(p_end))
+			months.append(calc)
+			amount += calc["total"]
 
 	return {
 		"enabled": bool(enabled),
 		"hours": hours,
-		"amount": amount,
-		"multiplier": multiplier,
+		"amount": flt(amount, 2),
+		"hourly_wage": months[0]["hourly_wage"] if months else 0.0,
+		"months": months,
 		"window_start": str(start),
 		"window_end": str(term),
 		"days": len(rows),
-		# The monthly divisor the hourly value was derived from, so the screen can show it.
-		"rate_working_days": flt(rate_days, 2),
 	}
 
 
@@ -320,29 +316,27 @@ def _overtime_lines(inp, flags):
 				             _money(hours), ot.get("window_start"), ot.get("window_end"))})
 		return []
 
-	amount = flt(ot.get("amount"))
-	multiplier = flt(ot.get("multiplier")) or 2.0
-	hourly = _r2(amount / (hours * multiplier)) if hours and multiplier else 0.0
-	# The amount is a sum over days, and each day's normal hours come from that day's
-	# shift, so there is no single exact "a × b" for it: a 4-hour Saturday and a 9.5-hour
-	# Tuesday do not share an hourly rate. Printing a rounded average and multiplying it
-	# back would show a total a few cents away from the amount actually paid — the guard
-	# in _check_reconciles catches precisely that. So the readable form is worded, and the
-	# note below says how it was summed.
+	months = ot.get("months") or []
+	parts = []
+	for m in months:
+		part = _("{0} h × {1} at 100%").format(_money(m["tier1_hours"]), _money(m["hourly_wage"]))
+		if m["tier2_hours"]:
+			part += " + " + _("{0} h × {1} at 75%").format(_money(m["tier2_hours"]), _money(m["hourly_wage"]))
+		parts.append(part)
+	# the guard re-adds the rounded tier amounts the line is made of
+	check = " + ".join("{0:.2f}".format(flt(m[k])) for m in months
+	                   for k in ("tier1_amount", "tier2_amount") if flt(m[k]))
 	return [_line(
-		SEC_OTHER, _("Overtime (approved, unpaid)"), amount, "company",
-		formula=_("{0} h at an average {1}/h with a ×{2} premium").format(
-			_money(hours), _money(hourly), _money(multiplier)),
+		SEC_OTHER, _("Overtime (approved, unpaid)"), flt(ot.get("amount")), "law",
+		formula="; ".join(parts), formula_check=check or None,
+		article=_("Artigos 237.º n.º 7 e 188.º"),
 		note=_("{0} hours on {1} day(s) recorded on submitted Attendance between {2} and "
-		       "{3}, unpaid because no submitted salary slip covers that period. Normal "
-		       "hourly value {4} (monthly remuneration over {5} working days), premium "
-		       "×{6}. Each day is priced on its own scheduled hours and the results are "
-		       "summed, so the average shown above is descriptive. Hours come from "
-		       "approved Attendance records only — never from days worked against a "
-		       "divisor.").format(
+		       "{3}, unpaid because no submitted salary slip covers that period. Hourly wage "
+		       "SH = salário-base × 12 / (52 × 44) = {4}; in each payroll month the first 30 "
+		       "hours are paid at 100% and the rest at 75%. Hours come from approved "
+		       "Attendance records only — never from days worked against a divisor.").format(
 			       _money(hours), ot.get("days"), ot.get("window_start"),
-			       ot.get("window_end"), _money(hourly),
-			       _money(ot.get("rate_working_days")), _money(multiplier)),
+			       ot.get("window_end"), _money(ot.get("hourly_wage"))),
 		irt=True, inss=True, key="overtime")]
 
 

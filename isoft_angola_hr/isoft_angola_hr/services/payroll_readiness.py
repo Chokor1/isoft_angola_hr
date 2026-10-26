@@ -201,8 +201,9 @@ def configuration_status(company, on_date=None):
 	    (str(daily_hours) if daily_hours else _("not set — using 8")),
 	    bool(daily_hours),
 	    _("Unset. Payroll is falling back to 8 hours a day. This divisor converts "
-	      "Timesheet hours into Paid Days and sets the hourly value used for overtime "
-	      "and on the payslip, so leaving it unset quietly assumes an 8-hour day."),
+	      "Timesheet hours into Paid Days and sets the hourly value shown on the payslip, "
+	      "so leaving it unset quietly assumes an 8-hour day. (Overtime does not use it: "
+	      "its hourly wage is fixed by art. 237.º n.º 7 at 52 weeks of 44 hours.)"),
 	    severity=WARNING)
 
 	if basis == "Standard (Fixed)":

@@ -182,3 +182,50 @@ class TestReadinessMessagesFollowTheReader(unittest.TestCase):
 			with self.subTest(code=code):
 				self.assertNotRegex(label, r"[ãõáéíóúâêôàçÃÕÁÉÍÓÚÂÊÔÀÇ]",
 				                    "%s stores an already-translated label" % code)
+
+
+class TestSalaryAdvanceLabel(unittest.TestCase):
+	""""Advance" is a salary advance here, not the verb.
+
+	ERPNext ships ``Advance,Avançar`` and loads after this app (apps.txt order), so the
+	app's own ``"Advance","Adiantamento"`` row always lost and the Payroll Preview column
+	read "Avançar" to Portuguese users. The word is therefore translated with the
+	"Salary Advance" context, which only this app defines; the bare word is left alone
+	because elsewhere it legitimately is a verb.
+	"""
+
+	CONTEXT = "Salary Advance"
+	DASHBOARD_JS = os.path.join(APP_ROOT, "page", "angola_hr_dashboard",
+	                            "angola_hr_dashboard.js")
+
+	def test_the_preview_column_carries_the_context(self):
+		from isoft_angola_hr.isoft_angola_hr import api
+		col = [c for c in api.PREVIEW_COLUMNS if c["key"] == "adiantamento"][0]
+		self.assertEqual((col["label"], col.get("context")), ("Advance", self.CONTEXT))
+		got = [c for c in api.get_preview_columns() if c["key"] == "adiantamento"][0]
+		self.assertEqual(got.get("context"), self.CONTEXT, "the saved column order must keep it")
+
+	def test_portuguese_reads_adiantamento_and_english_reads_advance(self):
+		with _Lang("pt"):
+			self.assertEqual(frappe._("Advance", context=self.CONTEXT), "Adiantamento")
+		with _Lang("en"):
+			self.assertEqual(frappe._("Advance", context=self.CONTEXT), "Advance")
+
+	def test_no_later_app_overrides_the_context_key(self):
+		from frappe.translate import get_translation_dict_from_file
+		merged = {}
+		for app in frappe.get_all_apps(True):
+			path = os.path.join(frappe.get_pymodule_path(app), "translations", "pt.csv")
+			merged.update(get_translation_dict_from_file(path, "pt", app) or {})
+		self.assertEqual(merged.get("Advance:" + self.CONTEXT), "Adiantamento")
+
+	def test_the_dashboard_sends_the_context_to_the_browser(self):
+		"""A Desk Page only receives the strings extracted from its own JS; the preview
+		header is rendered from a variable, so a literal with the same context must exist."""
+		from frappe.translate import extract_messages_from_code
+		code = io.open(self.DASHBOARD_JS, encoding="utf-8").read()
+		found = [m for m in extract_messages_from_code(code) if m[1] == "Advance"]
+		self.assertIn(self.CONTEXT, [m[2] for m in found if len(m) > 2])
+		# the preview header and the Preview Columns dialog render the server's column list
+		self.assertEqual(code.count("__(c.label, null, c.context)"), 2,
+		                 "both places that render preview columns must pass the context")

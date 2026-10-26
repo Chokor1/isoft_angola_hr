@@ -30,6 +30,8 @@ from isoft_angola_hr.isoft_angola_hr.services import performance
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import recruitment
 from isoft_angola_hr.isoft_angola_hr.services import release_gate
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 #: A real, minimal PDF. Content validation checks the signature, so a random blob would
 #: be rejected — which is exactly what the negative test relies on.

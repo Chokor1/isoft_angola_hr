@@ -37,6 +37,8 @@ from frappe.utils import flt, getdate
 from isoft_angola_hr.isoft_angola_hr.payroll import engine
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PayrollFixture
 from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 BASE = 150_000.0
 RATE = 50.0          # artigo 238.º n.º 1 al. b) minimum

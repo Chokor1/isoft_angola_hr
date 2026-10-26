@@ -15,6 +15,9 @@ move down to the record. :class:`TestSelfServiceIsolation` and
 :class:`TestRecordPermissions` are what prove it actually did.
 """
 
+import re
+import unittest
+
 import frappe
 from frappe.utils import cint, add_days, add_months, flt, getdate, nowdate
 
@@ -31,6 +34,8 @@ from isoft_angola_hr.isoft_angola_hr.services import org_analytics
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import recruitment
 from isoft_angola_hr.isoft_angola_hr.services import statutory_filing
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 
 class UXFixture(HRFixture):
@@ -1357,3 +1362,54 @@ class TestDeniedScreenTellsTheUser(UXFixture):
 		self.assertIn("403", body)
 		self.assertIn("PermissionError", body)
 		self.assertIn("do not have permission", body)
+
+
+# --------------------------------------------------------------------------- #
+# Payroll Preview: the editable amounts must be wide enough to read
+# --------------------------------------------------------------------------- #
+class TestPayrollPreviewInputsAreReadable(unittest.TestCase):
+	"""Regression for Overtime / Bonus / Advance inputs too narrow to read.
+
+	The inputs are ``form-control`` (width 100%) inside auto-sized columns and nothing
+	gave them a width of their own, so each column shrank to its header. Measured in
+	Chromium on the live preview before the fix: Overtime 65px, Bonus 44px, Advance 59px,
+	and "1000" / "12500" typed into Bonus / Advance showed as "10" / "1250". Static: it
+	reads the console source, so it needs no fixture.
+	"""
+
+	@staticmethod
+	def _source(ext):
+		import os
+
+		import isoft_angola_hr
+
+		path = os.path.join(
+			os.path.dirname(isoft_angola_hr.__file__), "isoft_angola_hr", "page",
+			"angola_hr_dashboard", "angola_hr_dashboard." + ext)
+		with open(path, encoding="utf-8") as fh:
+			return fh.read()
+
+	def _rule(self):
+		css = self._source("css")
+		m = re.search(r"\.pv-table input\.pv-f,\s*\.pv-table input\.pv-natal\s*{([^}]*)}", css)
+		self.assertTrue(m, "the Payroll Preview input rule is missing")
+		return m.group(1)
+
+	def _px(self, rule, prop):
+		m = re.search(r"(?:^|[;\s])" + prop + r":\s*(\d+)px", rule)
+		self.assertTrue(m, "%s is not set on the preview inputs" % prop)
+		return int(m.group(1))
+
+	def test_every_editable_amount_has_a_readable_minimum_width(self):
+		rule = self._rule()
+		# 12500.50 at 13px plus Chrome's number spinner needs ~92px
+		self.assertGreaterEqual(self._px(rule, "min-width"), 90)
+		self.assertGreaterEqual(self._px(rule, "max-width"), self._px(rule, "min-width"))
+		self.assertGreaterEqual(self._px(rule, "font-size"), 12)
+
+	def test_the_rule_covers_the_inputs_the_preview_renders(self):
+		js = self._source("js")
+		for key in ("overtime_amount", "productivity_bonus", "adiantamento"):
+			self.assertIn('case "%s":' % key, js)
+		self.assertIn('class="form-control input-xs pv-f" data-k="${c.key}"', js)
+		self.assertIn('class="form-control input-xs pv-natal"', js)

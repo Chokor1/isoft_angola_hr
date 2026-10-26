@@ -155,7 +155,21 @@ frappe.ui.form.on("Isoft Salary Slip", {
 					parts.push(row(__("Overtime"),
 						`${num(e.overtime_hours)} h — ${frappe.format(e.overtime_amount, { fieldtype: "Currency" })}`));
 				}
-				if (e.daily_value_formula) parts.push(row(__("Daily value"), esc(e.daily_value_formula)));
+				// Absences and late arrivals, priced by services/absences.py (HR, October 2026)
+				const ab = e.absences || {};
+				const money = (v) => frappe.format(v, { fieldtype: "Currency" });
+				if (e.daily_value_formula) parts.push(row(__("Value of one absence"), esc(e.daily_value_formula)));
+				if (ab.absence_deduction) {
+					const what = [];
+					if (ab.absent_days) what.push(__("{0} absent day(s)", [num(ab.absent_days)]));
+					if (ab.absent_hours) what.push(__("{0} absent hour(s)", [num(ab.absent_hours)]));
+					parts.push(row(__("Absence deduction"), `${esc(what.join(" + "))} — ${money(ab.absence_deduction)}`));
+				}
+				if (ab.late_minutes) {
+					parts.push(row(__("Late arrivals"), ab.late_deduction
+						? `${num(ab.late_minutes)} min — ${money(ab.late_deduction)}`
+						: `${num(ab.late_minutes)} min — ${__("under {0} minutes, nothing deducted", [num(ab.late_threshold)])}`));
+				}
 				parts.push(row(__("How paid days were set"), esc(e.how)));
 				if (!e.reconciles) {
 					parts.push(`<div style="margin-top:6px;color:#a94442"><b>${__(

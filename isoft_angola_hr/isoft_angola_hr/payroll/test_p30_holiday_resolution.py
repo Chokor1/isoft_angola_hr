@@ -40,6 +40,8 @@ from isoft_angola_hr.isoft_angola_hr.payroll.test_p27_calendar_days import (
 	SHIFT_95,
 )
 from isoft_angola_hr.isoft_angola_hr.services import work_calendar
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 #: September 2026: 22 weekdays, 4 Saturdays (5, 12, 19, 26), 4 Sundays.
 SEP_START, SEP_END = getdate("2026-09-01"), getdate("2026-09-30")
@@ -331,17 +333,16 @@ class TestNothingElseMovesTheTotal(HolidayResolutionFixture):
 
 	def test_12_overtime_never_increases_total_working_days(self):
 		from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
-			attendance_overtime_amount,
+			attendance_overtime_hours,
 		)
 
 		twd, _p = self.september(shift=SHIFT_95, employee_list=None,
 		                         company_list=None, shift_list=WITH_HOLIDAYS)
-		amount = attendance_overtime_amount(self.employee.name, 200000, twd,
-		                                    SEP_START, SEP_END, 2)
+		hours = attendance_overtime_hours(self.employee.name, SEP_START, SEP_END)
 		after, _q = compute_working_days(self.employee.name, SEP_START, SEP_END)
 		self.assertEqual(after, twd)
 		self.assertEqual(after, SEPTEMBER_WITH_HOLIDAYS)
-		self.assertGreaterEqual(flt(amount), 0.0)
+		self.assertGreaterEqual(flt(hours), 0.0)
 
 	def test_13_present_with_eight_hours_on_a_nine_and_a_half_hour_shift_is_a_full_day(self):
 		"""ERPNext refuses attendance on a future date, so this one uses the fixture's

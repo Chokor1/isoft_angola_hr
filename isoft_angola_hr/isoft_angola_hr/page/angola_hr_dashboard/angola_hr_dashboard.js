@@ -72,7 +72,7 @@ const HR_METHODS = new Set([
 	"create_appraisal_template", "list_appraisal_templates", "create_job_opening",
 	"create_job_applicant", "create_job_offer", "recruitment_reference_data",
 	"schedule_interview", "interview_pipeline", "performance_cycle_preview",
-	"performance_cycle_generate", "performance_cycle_close",
+	"performance_cycle_generate", "performance_cycle_close", "performance_cycle_progress",
 	// HR-operated mode — the front doors for work that used to live only in /ess or /mss
 	"create_bank_change", "add_employee_document", "record_justification",
 	"record_evaluation", "record_acknowledgement", "record_interview_result",
@@ -1091,7 +1091,14 @@ class AngolaHR {
 						let v = c.render ? c.render(r[c.key], r) : r[c.key];
 						if (c.money) v = this.money(r[c.key]);
 						if (c.date) v = this.d(r[c.key]);
-						return `<td class="${c.num || c.money ? "num" : ""}">${v != null ? v : ""}</td>`;
+						// A missing value is shown as a dash, like every hand-built table in
+						// the console, rather than as a silently blank cell (a timesheet with
+						// no employee looked like a rendering fault). Plain values are
+						// escaped; only a column's own render() may emit markup.
+						const html = c.render || c.money || c.date;
+						const cell = v == null || v === "" ? "—"
+							: html ? v : frappe.utils.escape_html(String(v));
+						return `<td class="${c.num || c.money ? "num" : ""}">${cell}</td>`;
 					})
 					.join("");
 				const id = opts.id ? `data-id="${frappe.utils.escape_html(r[opts.id])}"` : "";
@@ -1302,7 +1309,7 @@ class AngolaHR {
 						.map((h) => `<li>
 							<span class="ahr-hol-day">${this.d(h.holiday_date)}</span>
 							<span class="ahr-hol-desc">${esc(h.description || "")}</span>
-							<span class="ahr-hol-in">${h.days_until === 0 ? __("Today") : __("in {0} days", [h.days_until])}</span>
+							<span class="ahr-hol-in">${h.days_until === 0 ? __("Today") : h.days_until === 1 ? __("Tomorrow") : __("in {0} days", [h.days_until])}</span>
 						</li>`)
 						.join("")}</ul>`
 				: `<div class="ahr-empty">${o.default_holiday_list ? __("No upcoming holidays.") : __("Set a Default Holiday List in Settings → General.")}</div>`;
@@ -1310,8 +1317,8 @@ class AngolaHR {
 			this.$content.html(
 				cards +
 					`<div class="ahr-chart-grid">
-						${this.panel(__("Net Pay Trend"), `<div class="ahr-chart" data-ch="trend"></div>`, { icon: "fa-line-chart", subtitle: __("Total net pay of each approved payroll run.") })}
-						${this.panel(__("Salary Slips by Status"), `<div class="ahr-chart" data-ch="status"></div>`, { icon: "fa-pie-chart", subtitle: __("Where this month's slips are in the payroll cycle.") })}
+						${this.panel(__("Net Pay Trend"), `<div class="ahr-chart" data-ch="trend"></div>`, { icon: "fa-line-chart", subtitle: __("Total net pay of each approved payroll run, in millions of Kwanza.") })}
+						${this.panel(__("Salary Slips by Status"), `<div class="ahr-chart" data-ch="status"></div>`, { icon: "fa-pie-chart", subtitle: __("Where every salary slip stands in the payroll cycle, across all runs.") })}
 					</div>` +
 					`<div class="ahr-chart-grid">
 						${this.panel(__("Headcount by Department"), `<div class="ahr-chart" data-ch="dept"></div>`, { icon: "fa-sitemap", subtitle: __("Active employees in each department.") })}
@@ -1385,10 +1392,13 @@ class AngolaHR {
 		const t = o.net_pay_trend || [];
 		if (t.length && el("trend"))
 			this._charts.push(new frappe.Chart(el("trend"), {
-				data: { labels: t.map((x) => x.label), datasets: [{ name: __("Net Pay"), values: t.map((x) => x.total) }] },
+				// Plotted in millions: an eight-digit Kwanza figure does not fit the
+				// y-axis gutter and was drawn as "0000000". The tooltip keeps the
+				// full amount.
+				data: { labels: t.map((x) => x.label), datasets: [{ name: __("Net Pay"), values: t.map((x) => Math.round(x.total / 10000) / 100) }] },
 				type: "line", height: chartHeight(el("trend"), 240), colors: ["#2563eb"],
 				lineOptions: { regionFill: 1, hideDots: 0 }, axisOptions: { xIsSeries: 1 },
-				tooltipOptions: { formatTooltipY: (d) => this.money(d) },
+				tooltipOptions: { formatTooltipY: (d) => this.money(d * 1000000) },
 			}));
 
 		const st = o.slip_status || [];
@@ -2658,7 +2668,17 @@ class AngolaHR {
 			);
 			$(dlg.body).find(".slip-voucher").on("click", (ev) =>
 				this.viewVoucher($(ev.currentTarget).data("v")));
+			// ORIGINAL and DUPLICADO side by side on one sheet by default. A page cannot preset
+			// the browser's "Pages per sheet", so the server lays the sheet out
+			// (payroll/recibo_pdf.py); "1 per page" is the plain print view as before.
 			dlg.set_primary_action(__("Print / PDF"), () => {
+				window.open(
+					"/api/method/isoft_angola_hr.isoft_angola_hr.payroll.recibo_pdf.download_two_per_sheet?name=" +
+						encodeURIComponent(name),
+					"_blank");
+			});
+			dlg.set_secondary_action_label(__("1 per page"));
+			dlg.set_secondary_action(() => {
 				const url =
 					"/printview?doctype=Isoft Salary Slip&name=" +
 					encodeURIComponent(name) +
@@ -3983,7 +4003,7 @@ class AngolaHR {
 					{ Valid: "paid", Expiring: "draft", Expired: "cancelled", Superseded: "submitted" }[s] || "draft"
 				}">${__(s || "")}</span>`;
 				this.$content.find(".ahr-list").html(rows.length
-					? `<div class="ahr-list-meta">${rows.length} ${__("documents")}</div>
+					? `<div class="ahr-list-meta">${rows.length} ${rows.length === 1 ? __("document") : __("documents")}</div>
 						<table class="ahr-table"><thead><tr>
 							<th>${__("Employee")}</th><th>${__("Type")}</th><th>${__("Number")}</th>
 							<th>${__("Expires")}</th><th>${__("Status")}</th><th>${__("Verification")}</th>
@@ -4388,7 +4408,7 @@ class AngolaHR {
 				? this.panel({ title: __("Salary Advances"), actions: action, icon: "fa-money",
 					subtitle: __("Money paid before payroll and recovered from later periods. The instalment schedule is created on approval.") },
 					`<table class="ahr-table"><thead><tr>
-						<th>${__("Advance")}</th><th>${__("Employee")}</th><th>${__("Requested")}</th>
+						<th>${__("Advance", null, "Salary Advance")}</th><th>${__("Employee")}</th><th>${__("Requested")}</th>
 						<th class="num">${__("Approved")}</th><th class="num">${__("Recovered")}</th>
 						<th class="num">${__("Outstanding")}</th><th>${__("Instalments")}</th>
 						<th>${__("Status")}</th><th>${__("Waiting For")}</th><th></th></tr></thead><tbody>${rows.map((r) =>
@@ -4514,7 +4534,33 @@ class AngolaHR {
 				case "days": return `${flt(r.payment_days)}/${flt(r.total_working_days)}`;
 				case "vacation": return `<label class="pv-ferias-lbl"><input type="checkbox" class="pv-ferias" data-full="${flt(r.ferias_full)}" ${flt(r.vacation) > 0 ? "checked" : ""}> <span class="pv-ferias-amt">${flt(r.vacation) > 0 ? m(r.ferias_full) : "—"}</span></label>`;
 				case "christmas": return `<input type="number" class="form-control input-xs pv-natal" value="${flt(r.christmas)}">`;
-				case "overtime_amount":
+				case "overtime_amount": {
+					// HR enters HOURS; the amount and the art. 188.º split come from the server
+					// (services/overtime.py). Nothing is calculated here.
+					const o = r.overtime || {};
+					// hourly wage, then each tier: hours × rate = amount (the second only above 30 h)
+					const lines = flt(o.hours) ? [
+						__("Hourly wage {0}", [m(o.hourly_wage)]),
+						`${flt(o.tier1_hours)} h × ${flt(o.tier1_rate)}% = ${m(o.tier1_amount)}`,
+					].concat(flt(o.tier2_hours)
+						? [`+ ${flt(o.tier2_hours)} h × ${flt(o.tier2_rate)}% = ${m(o.tier2_amount)}`] : []) : [];
+					const tip = flt(o.hours)
+						? __("Hourly wage = basic salary × 12 ÷ (52 × 44). The first 30 hours of the month at 100%, the rest at 75%.") : "";
+					return `<input type="number" min="0" step="any" class="form-control input-xs pv-f" data-k="overtime_hours" value="${flt(r.overtime_hours)}" title="${__("Overtime hours in the month")}">
+						<div class="pv-ot-amt" title="${esc(tip)}"><b>${m(r.overtime_amount)}</b>${lines.map((l) => `<div class="pv-sub">${esc(l)}</div>`).join("")}</div>`;
+				}
+				case "absence": {
+					// what came off the basic salary, and why (services/absences.py)
+					const a = r.absences || {};
+					const lines = [];
+					if (flt(a.absent_days)) lines.push(__("{0} day(s) × {1}", [flt(a.absent_days), m(a.per_day)]));
+					if (flt(a.absent_hours)) lines.push(__("{0} h × {1}", [flt(a.absent_hours), m(a.hourly_wage)]));
+					if (flt(a.late_minutes)) lines.push(flt(a.late_deduction)
+						? __("{0} late min = {1}", [flt(a.late_minutes), m(a.late_deduction)])
+						: __("{0} late min (under {1}: nothing)", [flt(a.late_minutes), flt(a.late_threshold)]));
+					const tip = lines.length ? __("Hourly wage = basic salary × 12 ÷ 2288. One absence = hourly wage × 7.33 h; allowances are paid on 26 days; late arrivals count from 40 minutes.") : "";
+					return `<div title="${esc(tip)}">${m(r.absence)}${lines.map((l) => `<div class="pv-sub">${esc(l)}</div>`).join("")}</div>`;
+				}
 				case "productivity_bonus":
 				case "adiantamento":
 					return `<input type="number" class="form-control input-xs pv-f" data-k="${c.key}" value="${flt(r[c.key])}">`;
@@ -4533,7 +4579,7 @@ class AngolaHR {
 				<td class="pv-c"><input type="checkbox" class="pv-include" ${r.already ? "disabled" : (off ? "" : "checked")}></td>${tds}</tr>`;
 		}).join("");
 		const header = `<th class="pv-c"><input type="checkbox" class="pv-all" checked></th>` +
-			cols.map((c) => `<th class="${thCls(c)}">${__(c.label)}</th>`).join("");
+			cols.map((c) => `<th class="${thCls(c)}">${__(c.label, null, c.context)}${c.key === "overtime_amount" ? ` <span class="pv-sub">(${__("hours → Kz")})</span>` : ""}</th>`).join("");
 
 		$w.html(
 			this.panel(
@@ -4634,7 +4680,7 @@ class AngolaHR {
 				$(d.body).find(".pc-list").html(cols.map((c, i) => `
 					<div class="pc-row" data-i="${i}" style="display:flex;align-items:center;gap:8px;padding:6px 2px;border-bottom:1px solid var(--ahr-border);">
 						<input type="checkbox" class="pc-vis" ${c.visible ? "checked" : ""}>
-						<span style="flex:1;">${__(c.label)}</span>
+						<span style="flex:1;">${__(c.label, null, c.context)}</span>
 						<button class="btn btn-xs btn-default pc-up" ${i === 0 ? "disabled" : ""}>▲</button>
 						<button class="btn btn-xs btn-default pc-down" ${i === cols.length - 1 ? "disabled" : ""}>▼</button>
 					</div>`).join(""));
@@ -4675,14 +4721,19 @@ class AngolaHR {
 			const $tr = $(tr);
 			const emp = $tr.data("emp");
 			const o = { employee: emp, employee_name: $tr.data("name") };
-			$tr.find(".pv-f").each((__, i) => (o[$(i).data("k")] = flt($(i).val())));
+			// overtime hours go as typed: the server validates them rather than flt() turning
+			// a bad entry into 0
+			$tr.find(".pv-f").each((__, i) => {
+				const k = $(i).data("k");
+				o[k] = k === "overtime_hours" ? $(i).val() : flt($(i).val());
+			});
 			const $fer = $tr.find(".pv-ferias");
 			const ferias = $fer.length && $fer.is(":checked") ? flt($fer.data("full")) : 0;
 			const $nat = $tr.find(".pv-natal");
 			const natal = $nat.length ? flt($nat.val()) : 0;
 			o.subsidio_ferias = ferias;
 			o.subsidio_natal = natal;
-			inputs[emp] = { overtime_amount: o.overtime_amount, productivity_bonus: o.productivity_bonus, adiantamento: o.adiantamento, ferias_amount: ferias, natal_amount: natal };
+			inputs[emp] = { overtime_hours: o.overtime_hours, productivity_bonus: o.productivity_bonus, adiantamento: o.adiantamento, ferias_amount: ferias, natal_amount: natal };
 			if ($tr.find(".pv-include").is(":checked")) rows.push(o);
 		});
 		return { inputs, rows };
@@ -5221,7 +5272,7 @@ class AngolaHR {
 						${canExport ? `<button class="btn btn-xs btn-default pe-bank"><i class="fa fa-file-excel-o"></i> ${__("Export Bank File")}</button>` : ""}
 						${btn("close", __("Close Payroll"), "btn-default")}
 						${btn("cancel", __("Cancel Payroll"), "btn-danger")}
-						<button class="btn btn-xs btn-danger pe-delete">${__("Delete Entry")}</button>
+						${sum.can_delete ? `<button class="btn btn-xs btn-danger pe-delete">${__("Delete Entry")}</button>` : ""}
 					</div>
 					<div class="text-muted small" style="margin-top:6px;">${__("Tick employees to act on a subset; actions apply to the ticked rows.")}</div>`
 			);
@@ -5347,7 +5398,7 @@ class AngolaHR {
 			.map(
 				(r, i) => `<tr data-i="${i}">
 				<td><input class="form-control input-xs irt-f" data-k="from_amount" value="${flt(r.from_amount)}"></td>
-				<td><input class="form-control input-xs irt-f" data-k="to_amount" value="${flt(r.to_amount)}"></td>
+				<td><input class="form-control input-xs irt-f" data-k="to_amount" value="${flt(r.to_amount) || ""}" placeholder="${__("and above")}"></td>
 				<td><input class="form-control input-xs irt-f" data-k="excess_over" value="${flt(r.excess_over)}"></td>
 				<td><input class="form-control input-xs irt-f" data-k="rate" value="${flt(r.rate)}"></td>
 				<td><input class="form-control input-xs irt-f" data-k="parcela_fixa" value="${flt(r.parcela_fixa)}"></td>
@@ -5418,11 +5469,11 @@ class AngolaHR {
 						${num("ss_employer_rate", "Social Security - Employer %")}
 						${num("food_allowance_exemption", "Food Allowance Exemption")}
 						${num("transport_allowance_exemption", "Transport Allowance Exemption")}
-							${num("overtime_multiplier", "Overtime Multiplier")}
 							${num("ferias_rate", "Subsídio de Férias (% of Base)")}
 							${num("natal_rate", "Subsídio de Natal (% of Base, December)")}
 							${sel("natal_payment_month", "Natal Payment Month", ["January","February","March","April","May","June","July","August","September","October","November","December"])}
-					</div>`
+					</div>
+					<div class="text-muted small" style="margin-top:6px;">${__("Horas Extras are fixed by law, not configured: hourly wage = basic salary × 12 ÷ (52 × 44) (art. 237.º n.º 7); in a month the first 30 hours are paid at 100% and the rest at 75% (art. 188.º).")}</div>`
 				) +
 					this.panel(
 					{ title: __("Working Days"), icon: "fa-calendar",
@@ -5674,9 +5725,11 @@ class AngolaHR {
 					<div class="ahr-filters">
 						<div class="bc-ct"></div><div class="bc-start"></div><div class="bc-end"></div>
 						<div class="bc-prob"></div>
-						<label class="ahr-check"><input type="checkbox" class="bc-open"> ${__("Open-ended")}</label>
-						<label class="ahr-check"><input type="checkbox" class="bc-joining"> ${__("Start from each joining date")}</label>
-						<label class="ahr-check"><input type="checkbox" class="bc-docs"> ${__("Generate documents")}</label>
+						<div class="ahr-check-group">
+							<label class="ahr-check"><input type="checkbox" class="bc-open"> ${__("Open-ended")}</label>
+							<label class="ahr-check"><input type="checkbox" class="bc-joining"> ${__("Start from each joining date")}</label>
+							<label class="ahr-check"><input type="checkbox" class="bc-docs"> ${__("Generate documents")}</label>
+						</div>
 					</div>
 					<div style="margin:10px 0">
 						<button class="btn btn-xs btn-default bc-all">${__("Select all")}</button>
@@ -5704,7 +5757,10 @@ class AngolaHR {
 
 			const ct = frappe.ui.form.make_control({
 				df: { fieldtype: "Link", options: "Isoft Contract Type", label: __("Contract Type"),
-					reqd: 1, placeholder: __("Contract Type") },
+					reqd: 1, placeholder: __("Contract Type"),
+					// No "Create a new Isoft Contract Type" link at the foot of the list: it
+					// leaks the internal DocType name, and types are set up under Settings.
+					only_select: 1 },
 				parent: this.$content.find(".bc-ct"), render_input: true });
 			const start = frappe.ui.form.make_control({
 				df: { fieldtype: "Date", label: __("Start Date") },

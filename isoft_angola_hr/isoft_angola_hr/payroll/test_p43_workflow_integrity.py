@@ -34,6 +34,8 @@ from frappe.utils import add_months, flt, get_first_day, get_last_day, getdate
 from isoft_angola_hr.isoft_angola_hr import api
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, PayrollFixture
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 #: The fields the audit asked to protect. LIFECYCLE_FIELDS also covers the remaining stamps
 #: and the approval snapshot; this is the minimum.

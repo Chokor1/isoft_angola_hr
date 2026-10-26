@@ -25,6 +25,8 @@ from isoft_angola_hr.isoft_angola_hr import api
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import (
 	get_active_profile,
 )
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 PREFIX = "_TEST AHR"
 
@@ -61,13 +63,50 @@ def _account(company, name, root_type):
 	return doc.name
 
 
+def _write_setting(field, value):
+	"""Store one Isoft HR Settings field the way the Settings screen does; None removes it.
+	The separation switches are read from this row directly, the rest through the cached
+	document, which is dropped here."""
+	frappe.db.sql("""delete from `tabSingles` where doctype = 'Isoft HR Settings' and field = %s""",
+	              field)
+	if value is not None:
+		frappe.db.sql("""insert into `tabSingles` (doctype, field, value)
+			values ('Isoft HR Settings', %s, %s)""", (field, value))
+	frappe.clear_document_cache("Isoft HR Settings", "Isoft HR Settings")
+	frappe.db.value_cache.pop("Isoft HR Settings", None)
+
+
+def _stored_setting(field):
+	"""The stored Isoft HR Settings row for ``field``, or None when it was never stored.
+	Not get_single_value(): that casts a missing Check to 0, and "never stored" is what
+	gives a separation switch its safe default."""
+	row = frappe.db.sql("""select value from `tabSingles`
+		where doctype = 'Isoft HR Settings' and field = %s""", field)
+	return row[0][0] if row else None
+
+
+def free_account_number(company):
+	"""An account number no account of ``company`` uses, from 99998xx: disjoint from the
+	99999xx numbers :func:`_account` hands out, whose sequence grows over a whole run, so
+	a test's own extra account can never collide with a fixture account."""
+	n = 9999800
+	while frappe.db.exists("Account", {"company": company, "account_number": str(n)}):
+		n += 1
+	return str(n)
+
+
 class PayrollFixture(FrappeTestCase):
 	"""Shared, self-contained payroll fixture."""
 
 	@classmethod
 	def setUpClass(cls):
+		from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import require_isolated_site
+		require_isolated_site()          # before the first write: see testing_guard
 		super().setUpClass()
 		frappe.set_user("Administrator")
+		# whatever an earlier, interrupted run left behind must not be read as this run's
+		cls._sweep_payroll_leftovers([])
+		frappe.db.commit()
 		cls._created = []          # (doctype, name), deleted in reverse in tearDownClass
 		cls.company = _company()
 		# Post in the current month: the site has an accounting freeze date, and a fixed
@@ -196,17 +235,29 @@ class PayrollFixture(FrappeTestCase):
 		failed = []
 		for doctype, name in reversed(cls._created):
 			try:
-				if frappe.db.exists(doctype, name):
-					frappe.delete_doc(doctype, name, force=True, ignore_permissions=True,
-					                  delete_permanently=True)
+				cls._remove(doctype, name)
 			except Exception as exc:
 				failed.append("{0} {1}: {2}".format(doctype, name,
 				                                    frappe.utils.strip_html(str(exc))[:160]))
+		cls._sweep_payroll_leftovers(failed)
 		# Any orphan history left by an employee created outside cls._created.
 		for name in frappe.db.sql_list(
 			"""select name from `tabIsoft Salary History` where employee not in
 			(select name from `tabEmployee`)"""):
 			frappe.delete_doc("Isoft Salary History", name, force=True, ignore_permissions=True)
+		# Core HR records a test wrote for a fixture employee without registering them
+		# (the 2026-09-16 run left a submitted Leave Allocation and a cancelled
+		# Attendance for an employee that no longer existed). Only rows whose employee
+		# is gone AND whose stored employee name carries the test prefix are touched.
+		for doctype in ("Leave Application", "Leave Allocation", "Attendance"):
+			for name in frappe.db.sql_list(
+				"""select name from `tab{0}` where employee not in (select name from `tabEmployee`)
+				and employee_name like %s""".format(doctype), PREFIX + "%"):
+				try:
+					cls._remove(doctype, name)
+				except Exception as exc:
+					failed.append("{0} {1}: {2}".format(doctype, name,
+					                                    frappe.utils.strip_html(str(exc))[:160]))
 		if failed:
 			# Printed, not logged: writing an Error Log inside a broken transaction fails
 			# silently, which is how the previous leak went unnoticed.
@@ -216,9 +267,149 @@ class PayrollFixture(FrappeTestCase):
 		frappe.db.commit()
 		super().tearDownClass()
 
+	@classmethod
+	def _remove(cls, doctype, name):
+		"""Delete one fixture record, cancelling it first if it is submitted.
+
+		frappe.delete_doc refuses a submitted record even with force=True on v13,
+		so a Leave Allocation a test submitted used to survive every cleanup.
+		"""
+		if not frappe.db.exists(doctype, name):
+			return
+		if frappe.db.get_value(doctype, name, "docstatus") == 1:
+			doc = frappe.get_doc(doctype, name)
+			doc.flags.ignore_permissions = True
+			doc.flags.ignore_links = True
+			doc.cancel()
+		frappe.delete_doc(doctype, name, force=True, ignore_permissions=True,
+		                  delete_permanently=True)
+
+	#: The approval policy the application documents (Settings → "HR / Finance boundary":
+	#: self-approval off, both Finance rules on; test_p39 INTENDED: payroll and payment
+	#: approved by a second person). A site may run another operating model; a test that
+	#: asserts THIS policy pins it with :meth:`pin_settings` instead of inheriting the site's.
+	DOCUMENTED_APPROVAL_POLICY = {
+		"require_separate_payroll_approval": 1,
+		"require_separate_payment_approval": 1,
+		"allow_hr_self_approval": 0,
+		"payroll_posting_requires_finance": 1,
+		"payroll_payment_requires_finance": 1,
+	}
+
+	def pin_settings(self, **values):
+		"""Hold Isoft HR Settings fields at the values this test asserts, for this test only.
+
+		Written to the stored row, as the Settings screen stores it, inside the test's
+		savepoint, and the previous row is written back as a cleanup too, in case anything
+		in the test committed. The site's own configuration is never changed."""
+		for field, value in values.items():
+			self.addCleanup(_write_setting, field, _stored_setting(field))
+			_write_setting(field, value)
+
+	def block_commits(self):
+		"""Make ``frappe.db.commit`` a no-op for the rest of this test.
+
+		Several endpoints commit (they must, in production). Inside a test a commit ends
+		the savepoint, so a test that then fails leaves everything it wrote on the site,
+		and in the payroll tests that includes posted Journal Entries. With commits blocked
+		the endpoint still runs every validation, ledger entry and state change; only the
+		durability is withheld, and tearDown rolls it all back."""
+		original = frappe.db.commit
+		frappe.db.commit = lambda *a, **k: None
+		self.addCleanup(setattr, frappe.db, "commit", original)
+
+	#: Test users own whatever they post: `_test.ahr.…@example.invalid`, `_test-ahr.…@ahrtest.invalid`.
+	TEST_OWNERS = ("\\_test.ahr.%", "\\_test-ahr.%")
+
+	@classmethod
+	def _sweep_payroll_leftovers(cls, failed):
+		"""Remove payroll that a test made durable without registering it.
+
+		Runs created by ``ControlFixture.make_entry`` and the slips and vouchers posted from
+		them rely on the per-test savepoint. Any commit inside a test (an endpoint that
+		commits, a refusal that did not happen) makes them permanent, and nothing registered
+		them. That is how a posted test run, its Journal Entry and a "Finance confirmed"
+		mapping record stayed in ITEC's books on 2026-10-07. Fixture IDs come from naming
+		series whose increment is rolled back too, so the next run's employee then
+		"inherited" the leftover.
+
+		Only records that carry a test marker are touched: runs whose payroll group starts
+		with the prefix, slips of prefixed employees or of those runs, vouchers owned by
+		test users, touching prefixed accounts or naming those slips, and the bank exports
+		and account-change rows of those runs. Real payroll cannot match any of these.
+		"""
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
+
+		like = "\\" + PREFIX + "%"          # "\\_TEST AHR%": the underscore literal, not a wildcard
+		runs = frappe.db.sql_list(
+			"select name from `tabIsoft Payroll Entry` where payroll_group like %s", like)
+		slips = frappe.db.sql_list(
+			"""select name from `tabIsoft Salary Slip` where employee_name like %s
+			or payroll_entry in (select name from `tabIsoft Payroll Entry`
+			                     where payroll_group like %s)""", (like, like))
+		vouchers = set(frappe.db.sql_list(
+			"""select distinct je.name from `tabJournal Entry` je
+			left join `tabJournal Entry Account` a on a.parent = je.name
+			left join `tabAccount` acc on acc.name = a.account
+			where acc.account_name like %s or je.owner like %s or je.owner like %s""",
+			(like,) + cls.TEST_OWNERS))
+		for slip in slips:
+			vouchers.update(frappe.db.sql_list(
+				"""select name from `tabJournal Entry` where user_remark in (%s, %s)""",
+				("Payroll: " + slip, "Salary payment: " + slip)))
+
+		from isoft_angola_hr.isoft_angola_hr.payroll import testing_guard
+
+		def remove(doctype, name):
+			# A protected run (testing_guard) never makes anything durable, so a matching
+			# record that predates it was left by an earlier session or belongs to somebody
+			# else: it is reported, never deleted.
+			if testing_guard.protected_run_active():
+				created = frappe.db.get_value(doctype, name, "creation")
+				if created and str(created) < testing_guard.STATE.started:
+					print("   (not deleted, predates this protected run) {0} {1}".format(doctype, name))
+					return
+			try:
+				with wf.unlocked():
+					cls._remove(doctype, name)
+			except Exception as exc:
+				failed.append("{0} {1}: {2}".format(doctype, name,
+				                                    frappe.utils.strip_html(str(exc))[:160]))
+
+		for name in sorted(vouchers):
+			remove("Journal Entry", name)
+		for name in frappe.db.sql_list(
+				"select name from `tabIsoft Bank Export` where payroll_entry in ({0})".format(
+					", ".join(["%s"] * len(runs))), runs) if runs else []:
+			remove("Isoft Bank Export", name)
+		for name in slips:
+			remove("Isoft Salary Slip", name)
+		frappe.flags.in_test = True          # the history guard admits test records only
+		for name in frappe.db.sql_list(
+				"""select name from `tabIsoft Payroll Account Change` where label like %s
+				or changed_by like %s or changed_by like %s{0}""".format(
+					" or posted_payroll in ({0})".format(", ".join(["%s"] * len(runs))) if runs else ""),
+				(like,) + cls.TEST_OWNERS + tuple(runs)):
+			remove("Isoft Payroll Account Change", name)
+		for name in runs:
+			created = frappe.db.get_value("Isoft Payroll Entry", name, "creation")
+			if testing_guard.protected_run_active() and created and str(created) < testing_guard.STATE.started:
+				print("   (not deleted, predates this protected run) Isoft Payroll Entry {0}".format(name))
+				continue
+			frappe.db.set_value("Isoft Payroll Entry", name, "status", wf.CANCELLED,
+			                    update_modified=False)
+			remove("Isoft Payroll Entry", name)
+		for name in frappe.db.sql_list(
+				"""select name from tabAccount where account_name like %s and name not in
+				(select distinct account from `tabGL Entry`)""", like):
+			remove("Account", name)
+
 	def setUp(self):
 		"""Isolate each test: everything it writes is rolled back to this savepoint, so
 		records created by one test cannot leak into the next."""
+		#: Documents a test looks for are the ones written from here on, never an earlier
+		#: run's (fixture IDs repeat, see _sweep_payroll_leftovers).
+		self.test_started = frappe.utils.now()
 		frappe.db.savepoint("ahr_test")
 
 	def tearDown(self):
@@ -422,6 +613,7 @@ class TestPayrollAccounting(PayrollFixture):
 		self.assertEqual(first, second)
 		self.assertEqual(
 			frappe.db.count("Journal Entry", {"user_remark": ("like", "%" + slip.name + "%"),
+			                                  "creation": (">=", self.test_started),
 			                                  "voucher_type": "Journal Entry"}), 1)
 
 	def test_paying_twice_creates_one_entry(self):

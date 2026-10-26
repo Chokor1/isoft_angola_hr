@@ -48,6 +48,8 @@ from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import (PREFIX,
                                                                         PayrollFixture)
 from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
 from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readiness
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DASHBOARD_JS = os.path.join(APP_ROOT, "isoft_angola_hr", "page", "angola_hr_dashboard",

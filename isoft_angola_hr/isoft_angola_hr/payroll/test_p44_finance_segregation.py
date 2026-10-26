@@ -39,6 +39,8 @@ from isoft_angola_hr.isoft_angola_hr.services import bank_export
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import production_readiness as pr
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 FINANCE_ENDPOINTS = ("make_bulk_journal_entry", "make_bulk_payment_entry", "export_bank_transfer",
                      "bank_export_preflight")
@@ -58,6 +60,14 @@ class SegregationFixture(ControlFixture):
 		"acc": [perms.ACCOUNTS_MANAGER],                            # Finance, ERPNext-style
 		"fin_hrm": [perms.PAYROLL_FINANCE, perms.HR_MANAGER],       # explicit finance grant
 	})
+
+	def setUp(self):
+		super().setUp()
+		# Posting and paying go through the real endpoints, which commit: blocked, so a
+		# failing test cannot leave a voucher in the company's books.
+		self.block_commits()
+		# What these tests assert is the documented Finance rule, whatever the site runs.
+		self.pin_settings(**self.DOCUMENTED_APPROVAL_POLICY)
 
 	# ------------------------------------------------------------------ #
 	def as_user(self, key):

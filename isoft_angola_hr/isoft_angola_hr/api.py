@@ -206,16 +206,26 @@ def get_overview(company=None):
 	if company:
 		emp_filters["company"] = company
 
-	net = frappe.db.sql(
-		"""select coalesce(sum(net_pay),0) from `tabIsoft Salary Slip`
-		where docstatus=1 and start_date>=%s and end_date<=%s {c}""".format(
-			c="and company=%s" if company else ""
-		),
-		([start, end, company] if company else [start, end]),
-	)[0][0]
-
 	cflt = "and company=%s" if company else ""
 	cargs = [company] if company else []
+
+	# A slip belongs to the month its pay period ENDS in. Payroll here runs from
+	# the 23rd to the 22nd, so "start_date >= month start and end_date <= month
+	# end" never matched a single slip and every month read zero while the
+	# payroll history below showed 11 million paid.
+	def month_net(m_start, m_end):
+		return frappe.db.sql(
+			"""select coalesce(sum(net_pay),0) from `tabIsoft Salary Slip`
+			where docstatus=1 and end_date between %s and %s {c}""".format(c=cflt),
+			[m_start, m_end] + cargs,
+		)[0][0]
+
+	net = month_net(start, end)
+	submitted_this_month = frappe.db.sql(
+		"""select count(*) from `tabIsoft Salary Slip`
+		where docstatus=1 and end_date between %s and %s {c}""".format(c=cflt),
+		[start, end] + cargs,
+	)[0][0]
 
 	# --- Net pay trend (last 6 months) ---
 	base = getdate(nowdate())
@@ -223,11 +233,7 @@ def get_overview(company=None):
 	for i in range(5, -1, -1):
 		m_start = get_first_day(add_months(base, -i))
 		m_end = get_last_day(m_start)
-		total = frappe.db.sql(
-			"""select coalesce(sum(net_pay),0) from `tabIsoft Salary Slip`
-			where docstatus=1 and start_date>=%s and end_date<=%s {c}""".format(c=cflt),
-			[m_start, m_end] + cargs,
-		)[0][0]
+		total = month_net(m_start, m_end)
 		net_pay_trend.append({"label": formatdate(m_start, "MMM yy"), "total": flt(total)})
 
 	# --- Salary slips by lifecycle status ---
@@ -282,8 +288,8 @@ def get_overview(company=None):
 			"active_employees": frappe.db.count("Employee", emp_filters),
 			"salary_profiles": frappe.db.count("Isoft Salary Profile",
 			                                   {"company": company} if company else None),
-			"submitted_slips": frappe.db.count("Isoft Salary Slip", {
-				"docstatus": 1, **({"company": company} if company else {})}),
+			# Same month window as net_paid_month: the card's caption says "this month".
+			"submitted_slips": cint(submitted_this_month),
 			"net_paid_month": flt(net),
 		},
 		"net_pay_trend": net_pay_trend,
@@ -1079,7 +1085,7 @@ PREVIEW_COLUMNS = [
 	{"key": "christmas", "label": "Natal", "money": 1, "input": 1},
 	{"key": "overtime_amount", "label": "Overtime", "money": 1, "input": 1},
 	{"key": "productivity_bonus", "label": "Bonus", "money": 1, "input": 1},
-	{"key": "adiantamento", "label": "Advance", "money": 1, "input": 1},
+	{"key": "adiantamento", "label": "Advance", "context": "Salary Advance", "money": 1, "input": 1},
 	{"key": "absence", "label": "Absence Value", "money": 1, "input": 0},
 	{"key": "taxable_income", "label": "Taxable", "money": 1, "input": 0},
 	{"key": "ss", "label": "INSS", "money": 1, "input": 0},
@@ -1176,7 +1182,8 @@ def _exception_row(employee, start, end, message):
 		"department": employee.get("department"), "designation": employee.get("designation"),
 		"base": 0.0, "food": 0.0, "transport": 0.0, "absence": 0.0,
 		"total_working_days": 0.0, "payment_days": 0.0,
-		"productivity_bonus": 0.0, "overtime_amount": 0.0, "adiantamento": 0.0,
+		"productivity_bonus": 0.0, "overtime_hours": 0.0, "overtime_amount": 0.0,
+		"adiantamento": 0.0,
 		"vacation": 0.0, "ferias_full": 0.0, "christmas": 0.0, "natal_default": 0.0,
 		"taxable_income": 0.0, "ss": 0.0, "ss_employer": 0.0, "irt": 0.0,
 		"gross_pay": 0.0, "total_deduction": 0.0, "net_pay": 0.0,
@@ -1195,9 +1202,10 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		assert_single_profile_for_period,
 	)
 	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
-		attendance_overtime_amount, compute_working_days,
+		attendance_overtime_hours, compute_working_days, engine_day_inputs,
 	)
 	from isoft_angola_hr.isoft_angola_hr.payroll import engine
+	from isoft_angola_hr.isoft_angola_hr.services import overtime
 
 	inputs = (_json_arg(inputs, "inputs", default={})) or {}
 	start, end = getdate(start_date), getdate(end_date)
@@ -1231,6 +1239,10 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 			twd, pay_days = compute_working_days(e.name, start, end,
 			                                     validate_attendance=validate_attendance,
 			                                     based_on_timesheet=based_on_timesheet)
+			# the same day inputs the salary slip builds (absences priced by services/absences.py)
+			days = engine_day_inputs(e.name, start, end, validate_attendance=validate_attendance,
+			                         based_on_timesheet=based_on_timesheet,
+			                         total_working_days=twd, payment_days=pay_days)
 		except frappe.ValidationError as exc:
 			out.append(_exception_row(e, start, end, frappe.utils.strip_html(str(exc))))
 			continue
@@ -1247,33 +1259,44 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		natal_default = (engine.default_natal(prof.base, settings.natal_rate, e.date_of_joining,
 		                                      end, settings.get("natal_payment_month"))
 		                 if engine.component_enabled(settings, "SNA") else 0.0)
-		# Overtime defaults to the amount computed from logged Attendance overtime hours
-		# (when validating attendance); HR can override it in the preview.
-		ot_default = (attendance_overtime_amount(e.name, prof.base, twd, start, end, settings.overtime_multiplier)
-		              if cint(validate_attendance) else 0.0)
+		# Overtime is HOURS. They default to the approved hours on submitted Attendance
+		# (attendance-based runs, component switched on) and HR can change them here; the
+		# amount is never typed — the engine prices them (services/overtime.py).
+		ot_default = (attendance_overtime_hours(e.name, start, end)
+		              if cint(validate_attendance) and engine.component_enabled(settings, "HEX")
+		              else 0.0)
 		inp = inputs.get(e.name)
+		stale_amount = 0.0
 		if inp is None:
 			ferias_amt, natal_amt = 0.0, natal_default
-			overtime_amt = ot_default
+			overtime_hrs = ot_default
 		else:
 			ferias_amt = flt(inp.get("ferias_amount"))
 			natal_amt = flt(inp.get("natal_amount"))
-			overtime_amt = flt(inp.get("overtime_amount"))
+			overtime_hrs = inp.get("overtime_hours")
+			if "overtime_hours" not in inp:
+				# a screen from before overtime became hours: let the engine refuse it
+				stale_amount = inp.get("overtime_amount")
 		try:
+			overtime.assert_possible(overtime_hrs, start, end, who=e.employee_name)
 			res = engine.compute_slip(prof, {
 				"productivity_bonus": flt((inp or {}).get("productivity_bonus")),
-				"overtime_amount": overtime_amt,
+				"overtime_hours": overtime_hrs,
+				"overtime_amount": stale_amount,
 				"adiantamento": flt((inp or {}).get("adiantamento")),
 				"ferias_amount": ferias_amt, "natal_amount": natal_amt,
-				"payment_days": pay_days, "total_working_days": twd,
+				"payment_days": days["engine_payment_days"], "total_working_days": twd,
+				"absent_days": days["absent_days"], "absent_hours": days["absent_hours"],
+				"late_minutes": days["late_minutes"],
 				"start_date": start, "end_date": end,
 			}, settings=settings, on_date=end, employee=e.employee_name)
 		except frappe.ValidationError as exc:
 			out.append(_exception_row(e, start, end, frappe.utils.strip_html(str(exc))))
 			continue
 		ded = {d["abbr"]: d["amount"] for d in res["deductions"]}
-		# Base / food / transport are shown NET of absences (already prorated by the engine).
-		# Absence value = base_day/8 × absent hours = base × (1 − paid/total), base-only.
+		# Base / food / transport are shown NET of absences (the engine already took them
+		# off). Absence value = what came off the basic salary: the priced absences and late
+		# arrivals (services/absences.py), or the paid-days proration when HR overrode them.
 		earn = {x["abbr"]: x["amount"] for x in res["earnings"]}
 		base_net = flt(earn.get("SB"))
 		food_net = flt(earn.get("SDA"))
@@ -1291,9 +1314,14 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 			"department": e.department, "designation": e.designation,
 			"base": base_net, "food": food_net,
 			"transport": transport_net, "absence": absence_value,
+			# the breakdown behind the absence value, so the screen shows how it was reached
+			"absences": res["absences"],
 			"total_working_days": twd, "payment_days": pay_days,
 			"productivity_bonus": flt((inp or {}).get("productivity_bonus")),
-			"overtime_amount": flt(overtime_amt),
+			"overtime_hours": res["overtime"]["hours"],
+			"overtime_amount": res["overtime"]["total"],
+			# the Art. 188.º split, so the screen shows how the amount was reached
+			"overtime": res["overtime"],
 			"adiantamento": flt((inp or {}).get("adiantamento")),
 			"vacation": flt(ferias_amt), "ferias_full": flt(ferias_full),
 			"christmas": flt(natal_amt), "natal_default": flt(natal_default),
@@ -1346,14 +1374,21 @@ def create_payroll_from_preview(company, start_date, end_date, rows, posting_dat
 	entry.posting_date = getdate(posting_date) if posting_date else getdate(end_date)
 	entry.validate_attendance = cint(validate_attendance)
 	entry.based_on_timesheet = cint(based_on_timesheet)
+	from isoft_angola_hr.isoft_angola_hr.services import overtime
+
 	for r in rows:
+		who = r.get("employee_name") or r["employee"]
+		if "overtime_hours" not in r and flt(r.get("overtime_amount")):
+			frappe.throw(_("Overtime is calculated from overtime HOURS; an amount was sent for "
+			               "{0}. Reload the page and enter hours.").format(frappe.bold(who)),
+			             title=_("Overtime Hours Required"))
 		prof = get_active_profile(r["employee"], entry.end_date, company=company,
 		                          employee_name=r.get("employee_name"))
 		entry.append("employees", {
 			"employee": r["employee"], "employee_name": r.get("employee_name"),
 			"salary_profile": prof.name if prof else None,
 			"productivity_bonus": flt(r.get("productivity_bonus")),
-			"overtime_amount": flt(r.get("overtime_amount")),
+			"overtime_hours": float(overtime.parse_hours(r.get("overtime_hours"), who)),
 			"adiantamento": flt(r.get("adiantamento")),
 			"subsidio_ferias": flt(r.get("subsidio_ferias")),
 			"subsidio_natal": flt(r.get("subsidio_natal")),
@@ -1966,6 +2001,9 @@ def payroll_approval_summary(name):
 	perms.require_company(entry.company)
 	summary = entry.approval_summary()
 	summary["payment_blockers"] = readiness.payment_blockers(entry)
+	# The Delete button follows the same rule delete_payroll_entry enforces; it used to be
+	# drawn for everybody, so an HR User saw it and was refused on click.
+	summary["can_delete"] = _payroll_deletable_by(entry)
 	# The approval gate, for the screen: READY or BLOCKED with the reasons in business
 	# language. Rendered only while the run is still before approval; the server
 	# re-checks on submit and approve whatever the screen showed.
@@ -2282,6 +2320,18 @@ def cancel_payroll_entry(name):
 	return n
 
 
+#: Payroll nobody has approved; anything later is evidence and is cancelled, not erased.
+_DELETABLE_STATES = (wf.DRAFT, wf.CALCULATED, wf.REJECTED, wf.CANCELLED)
+
+
+def _payroll_deletable_by(entry, user=None):
+	"""Whether delete_payroll_entry would accept this entry from this user (role, company
+	and state; linked accounting is checked when the deletion runs)."""
+	return bool(perms.can(perms.PAYROLL_CANCEL, user=user)
+	            and perms.can_company(entry.company, user=user)
+	            and wf.state_of(entry) in _DELETABLE_STATES)
+
+
 @frappe.whitelist(methods=["POST"])
 def delete_payroll_entry(name):
 	"""Cancel + delete the entry's salary slips, then delete the entry.
@@ -2292,7 +2342,7 @@ def delete_payroll_entry(name):
 	_guard(perms.PAYROLL_CANCEL)
 	entry = frappe.get_doc("Isoft Payroll Entry", name)
 	perms.require_company(entry.company)
-	if wf.state_of(entry) not in (wf.DRAFT, wf.CALCULATED, wf.REJECTED, wf.CANCELLED):
+	if wf.state_of(entry) not in _DELETABLE_STATES:
 		frappe.throw(
 			_("A payroll that has been {0} cannot be deleted — cancel it instead so the audit "
 			  "trail survives.").format(_(wf.state_of(entry))))
@@ -2513,7 +2563,15 @@ def settlement_preview(data):
 	from isoft_angola_hr.isoft_angola_hr.payroll import settlement as fs
 
 	d = _json_arg(data, "data", default={})
-	res = fs.compute(_engine_inputs(d))
+	inputs = _engine_inputs(d)
+	# The saved settlement gathers approved unpaid overtime (IsoftFinalSettlement.inputs);
+	# the form's live figures must include the same line, or HR approves one total on
+	# screen and the document stores another.
+	if d.get("employee") and d.get("termination_date"):
+		inputs["overtime"] = fs.collect_unpaid_overtime(
+			d.get("employee"), d.get("company"), flt(d.get("base")),
+			d.get("salary_period_start"), d.get("termination_date"))
+	res = fs.compute(inputs)
 	res["payment_deadline"] = fs.payment_deadline(d.get("termination_date"),
 	                                              d.get("reason_key") or None)
 	return res
@@ -3129,7 +3187,8 @@ def get_settings(company=None):
 		"default_company", "default_irt_table", "currency", "payroll_cycle_start_day",
 		"ss_employee_rate", "ss_employer_rate",
 		"food_allowance_exemption", "transport_allowance_exemption", "standard_daily_hours",
-		"overtime_multiplier", "working_days_basis", "standard_working_days",
+		# overtime_multiplier is deprecated and ignored (services/overtime.py): not offered
+		"working_days_basis", "standard_working_days",
 		"ferias_rate", "natal_rate", "natal_payment_month",
 		"settlement_salary_days", "settlement_leave_days",
 		"enable_productivity_bonus", "enable_overtime", "enable_adiantamento", "enable_family_allowance",

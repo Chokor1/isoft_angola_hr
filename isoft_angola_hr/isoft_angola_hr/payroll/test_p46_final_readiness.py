@@ -31,7 +31,7 @@ from frappe.utils import flt
 
 from isoft_angola_hr.isoft_angola_hr import api
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_hr_settings import isoft_hr_settings as settings_module
-from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX
+from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import PREFIX, free_account_number
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p2_controls import ControlFixture
 from isoft_angola_hr.isoft_angola_hr.services import bank_export
 from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
@@ -40,6 +40,8 @@ from isoft_angola_hr.isoft_angola_hr.services import payroll_reconciliation as r
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 from isoft_angola_hr.isoft_angola_hr.services import production_readiness as pr
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 CONTACT = "Please contact Finance."
 EMPLOYER_INSS_MISSING = "Employer Social Security expense account is not configured. " + CONTACT
@@ -61,12 +63,19 @@ class ReadinessFixture(ControlFixture):
 		parent = frappe.db.get_value("Account", cls.acc["CTSS3"], "parent_account")
 		cls.alt_liability = cls._track(frappe.get_doc({
 			"doctype": "Account", "account_name": PREFIX + " INSS 3pct alternativa",
-			"account_number": "9999978", "company": cls.company, "root_type": "Liability",
+			"account_number": free_account_number(cls.company), "company": cls.company,
+			"root_type": "Liability",
 			"is_group": 0, "parent_account": parent,
 		}).insert(ignore_permissions=True)).name
 
 	def setUp(self):
 		super().setUp()
+		# Nothing in these tests may become durable: they post and pay through the real
+		# endpoints, and on 2026-10-07 a refusal that did not happen let one of them
+		# commit a posted test run into the company's books.
+		self.block_commits()
+		# The Finance rule these tests assert is the documented one, whatever the site runs.
+		self.pin_settings(**self.DOCUMENTED_APPROVAL_POLICY)
 		frappe.db.set_value("Employee", self.employee.name, "custom_iban", "AO06000600000100037131174")
 		frappe.clear_messages()
 

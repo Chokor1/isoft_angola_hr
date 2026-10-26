@@ -50,7 +50,7 @@ def execute(filters=None):
 
 def _columns():
 	return [
-		ru.column(_("Advance"), "name", "Link", 120, "Isoft Salary Advance"),
+		ru.column(_("Advance", context="Salary Advance"), "name", "Link", 120, "Isoft Salary Advance"),
 		ru.column(_("Employee"), "employee", "Link", 110, "Employee"),
 		ru.column(_("Employee Name"), "employee_name", "Data", 180),
 		ru.column(_("Department"), "department", "Link", 140, "Department"),

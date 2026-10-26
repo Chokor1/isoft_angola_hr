@@ -29,6 +29,8 @@ from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import (PREFIX,
                                                                         PayrollFixture)
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
+from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
+	require_isolated_site as setUpModule)  # database-writing tests: isolated sites only
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -268,6 +270,31 @@ class TestAuthorisationByCapability(SecurityFixture):
 		                                    {"company": self.company}), (list, tuple))
 
 
+class TestTheDeleteButtonFollowsTheServer(SecurityFixture):
+	"""Delete Entry was drawn for everybody, so an HR User saw it and was refused on click.
+	payroll_approval_summary now says whether delete_payroll_entry would accept it."""
+
+	def test_an_hr_user_is_not_offered_delete_and_is_refused(self):
+		name = self.payroll_run()
+		self.as_user("hruser")
+		self.assertFalse(api.payroll_approval_summary(name)["can_delete"])
+		with self.assertRaises(frappe.PermissionError):
+			api.delete_payroll_entry(name)
+		frappe.set_user("Administrator")
+		self.assertTrue(frappe.db.exists("Isoft Payroll Entry", name))
+
+	def test_an_hr_manager_is_offered_delete_on_an_unapproved_run(self):
+		name = self.payroll_run()
+		self.as_user("hrmanager")
+		self.assertTrue(api.payroll_approval_summary(name)["can_delete"])
+
+	def test_nobody_is_offered_delete_once_the_run_is_approved(self):
+		name = self.payroll_run()
+		self.approve_run(name, state=wf.APPROVED)
+		self.as_user("hrmanager")
+		self.assertFalse(api.payroll_approval_summary(name)["can_delete"])
+
+
 class TestCompanyScope(SecurityFixture):
 
 	def _restrict(self, label, company):
@@ -312,6 +339,10 @@ class TestCompanyScope(SecurityFixture):
 
 
 class TestSelfApprovalCannotBeBypassed(SecurityFixture):
+	def setUp(self):
+		super().setUp()
+		# These tests assert the documented approval policy, whatever the site runs.
+		self.pin_settings(**self.DOCUMENTED_APPROVAL_POLICY)
 
 	def entry(self, **stamps):
 		doc = frappe.get_doc({
