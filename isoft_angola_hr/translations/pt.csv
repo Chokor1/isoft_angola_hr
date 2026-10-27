@@ -2993,3 +2993,7 @@
 "{0} late min (under {1}: nothing)","{0} min de atraso (abaixo de {1}: nada)"
 "Hourly wage = basic salary × 12 ÷ 2288. One absence = hourly wage × 7.33 h; allowances are paid on 26 days; late arrivals count from 40 minutes.","Salário/hora = salário-base × 12 ÷ 2288. Uma falta = salário/hora × 7,33 h; os subsídios são pagos a 26 dias; os atrasos contam a partir de 40 minutos."
 "Each absent day takes the hourly wage (basic salary × 12 ÷ 2288) × 7.33 h off the basic salary; absent hours take the hourly wage per hour; food and transport allowances are paid on 26 days less the absent days; late arrivals are deducted at the hourly wage per minute once 40 minutes accumulate.","Cada dia de falta retira ao salário-base o salário/hora (salário-base × 12 ÷ 2288) × 7,33 h; as horas de falta retiram o salário/hora por hora; os subsídios de alimentação e transporte são pagos a 26 dias menos os dias de falta; os atrasos são descontados ao salário/hora por minuto a partir de 40 minutos acumulados."
+"Absences - {0} day(s)","Faltas - {0} dia(s)","Recibo de Vencimento"
+"Absences - {0} day(s) + {1} h","Faltas - {0} dia(s) + {1} h","Recibo de Vencimento"
+"Absences - {0} h","Faltas - {0} h","Recibo de Vencimento"
+"Late arrivals - {0} min","Atrasos - {0} min","Recibo de Vencimento"

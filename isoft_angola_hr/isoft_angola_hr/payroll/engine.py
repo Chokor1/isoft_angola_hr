@@ -406,11 +406,16 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 	advance_recovery = flt(inputs.get("advance_recovery"))
 
 	earnings = []
-	def add_e(abbr, amount):
+	def add_e(abbr, amount, name=None):
 		if amount or abbr in ("TI",):
 			c = COMPONENTS[abbr]
-			earnings.append({"abbr": abbr, "salary_component": c["name"], "amount": flt(amount, 2),
+			earnings.append({"abbr": abbr, "salary_component": name or c["name"], "amount": flt(amount, 2),
 			                 "do_not_include_in_total": 0 if c["in_gross"] else 1})
+
+	def count(v):
+		# "2", "0,5", "40": the site's number format without a trailing ",00"
+		text = frappe.utils.fmt_money(v, 2)
+		return text[:-3] if text[-2:] == "00" else text
 
 	add_e("SB", sb)
 	add_e("SDA", sda)
@@ -421,8 +426,16 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 	add_e("PPD", ppd)
 	add_e("HEX", hex_)
 	add_e("TI", taxable_income)  # statistical, excluded from gross
-	add_e("FAL", abs_["absence_deduction"])   # informative: already taken off SB
-	add_e("ATR", abs_["late_deduction"])
+	# Informative rows, already taken off SB. The stored name carries the count the
+	# amount was priced from, as the receipt this app replaced did ("Falta Injustificada
+	# - 1,0000 Dias"): "Faltas - 2 dias", "Faltas - 2 dias + 3 h", "Atrasos - 40 min".
+	absent_label = "Faltas - {0} {1}".format(count(abs_["absent_days"]),
+	                                        "dia" if abs_["absent_days"] == 1 else "dias")
+	if abs_["absent_hours"]:
+		absent_label = ("Faltas - {0} h".format(count(abs_["absent_hours"])) if not abs_["absent_days"]
+		                else absent_label + " + {0} h".format(count(abs_["absent_hours"])))
+	add_e("FAL", abs_["absence_deduction"], absent_label)
+	add_e("ATR", abs_["late_deduction"], "Atrasos - {0} min".format(count(abs_["late_minutes"])))
 
 	deductions = []
 	def add_d(abbr, amount):

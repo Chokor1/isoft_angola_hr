@@ -313,6 +313,16 @@ class TestAbsencesThroughPayroll(PayrollFixture):
 		memos = {m["code"]: m["amount"] for m in ctx["memos"]}
 		self.assertEqual(memos.get("F03"), 30769.20)
 		self.assertEqual(memos.get("F04"), 2097.90)
+		# the count the amount was priced from is on the line, as the old receipt had it
+		self.assertEqual([e.salary_component for e in s.earnings if e.abbr in ("FAL", "ATR")],
+		                 ["Faltas - 2 dias", "Atrasos - 60 min"])
+		labels = {m["code"]: m["label"] for m in ctx["memos"]}
+		self.assertEqual((labels["F03"], labels["F04"]), ("Absences - 2 day(s)", "Late arrivals - 60 min"))
+		from isoft_angola_hr.isoft_angola_hr.payroll.test_p42_payslip_receipt import _Lang, render, text_of
+		with _Lang("pt"):
+			pt = {m["code"]: m["label"] for m in recibo.get_context(s)["memos"]}
+		self.assertEqual((pt["F03"], pt["F04"]), ("Faltas - 2 dia(s)", "Atrasos - 60 min"))
+		self.assertIn("Faltas - 2 dia(s)", text_of(render(s.name, lang="pt")))
 		self.assertEqual(flt(ctx["total_earnings"], 2), flt(s.gross_pay, 2), "memo rows stay out of the total")
 		self.assertNotIn("F03", [e["code"] for e in ctx["earnings"]])
 

@@ -424,6 +424,10 @@ def _lines(doc):
 				"label": _line_label(abbr, row.get("salary_component")),
 				"amount": amount,
 			}
+			if abbr in ("FAL", "ATR"):
+				# "Faltas - 2 dias 30 769,20": the count the amount was priced from, in the
+				# reader's language, as the receipt this format replaced printed it
+				line["label"] = _absence_label(abbr, doc)
 			if cint(row.get("do_not_include_in_total")):
 				if abbr == TAXABLE_INCOME_ABBR:
 					continue
@@ -441,6 +445,25 @@ def _component_amount(rows, abbr):
 	"""Sum of a component's rows on the slip, located by its engine abbreviation."""
 	target = (abbr or "").strip()
 	return flt(sum(flt(r.get("amount")) for r in (rows or []) if (r.get("abbr") or "").strip() == target))
+
+
+def _count(value):
+	"""2 → "2", 0.5 → "0,5" in the site's number format (the template's qty())."""
+	text = frappe.utils.fmt_money(flt(value), 2)
+	return text[:-3] if text[-2:] == "00" else text
+
+
+def _absence_label(abbr, doc):
+	"""The description of an informative absence row, with its count."""
+	t = lambda msgid: _(msgid, context=TRANSLATION_CONTEXT)
+	if abbr == "ATR":
+		return t("Late arrivals - {0} min").format(_count(doc.get("late_minutes")))
+	days, hours = flt(doc.get("absent_days")), flt(doc.get("absent_hours"))
+	if days and hours:
+		return t("Absences - {0} day(s) + {1} h").format(_count(days), _count(hours))
+	if hours:
+		return t("Absences - {0} h").format(_count(hours))
+	return t("Absences - {0} day(s)").format(_count(days))
 
 
 def _line_label(abbr, stored_name):
