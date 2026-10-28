@@ -696,6 +696,9 @@ def get_context(doc):
 		"summary": {
 			"gross": gross,
 			"taxable": flt(doc.get("taxable_income")),
+			# the salary advance taken off this month (manual advance + instalment recovery):
+			# printed in the Summary in place of the taxable income (HR, October 2026)
+			"advance": _component_amount(doc.get("deductions"), "ADT"),
 			"inss": inss_retido,
 			"irt": irt_retido,
 			"total_deductions": total_deduction,

@@ -365,7 +365,6 @@ class TestReceiptContent(ReceiptFixture):
 		self.assertIn(money(slip.ss_employee_amount), text)
 		self.assertIn(money(slip.irt_amount), text)
 		self.assertIn(money(slip.gross_pay), text)           # as Total de Remunerações
-		self.assertIn(money(slip.taxable_income), text)
 		self.assertIn(money(slip.total_deduction), text)
 		self.assertIn(money(slip.net_pay), text)
 		self.assertIn("Total a Receber".upper(), text.upper())
@@ -403,12 +402,26 @@ class TestReceiptContent(ReceiptFixture):
 			self.assertNotIn("rv-sign-cap\">Data:", html)
 			self.assertNotIn("rv-sign-cap\">Date:", html)
 
+	def test_the_summary_shows_the_salary_advance_not_the_taxable_income(self):
+		"""HR, October 2026: the advance taken this month matters to the employee; the
+		taxable income is an IRT base and is not printed."""
+		slip = self.make_slip(submit=True, **self.enabled_inputs(adiantamento=50000))
+		if not flt(slip.adiantamento):
+			self.skipTest("the advance component is switched off on this site")
+		for lang, label, dropped in (("pt", "Adiantamento", "Rendimento Tributável"),
+		                             ("en", "Salary Advance", "Taxable Income")):
+			text = text_of(render(slip.name, lang=lang))
+			self.assertIn(label, text, lang)
+			self.assertIn(money(50000), text, lang)
+			self.assertNotIn(dropped, text, lang)
+
 	def test_context_copies_the_headline_figures_from_the_slip(self):
 		slip = self.full_slip()
 		ctx = recibo.get_context(slip)
 
 		self.assertAlmostEqual(ctx["summary"]["gross"], flt(slip.gross_pay), places=2)
 		self.assertAlmostEqual(ctx["summary"]["taxable"], flt(slip.taxable_income), places=2)
+		self.assertAlmostEqual(ctx["summary"]["advance"], flt(slip.adiantamento) + flt(slip.advance_recovery), places=2)
 		self.assertAlmostEqual(ctx["summary"]["inss"], flt(slip.ss_employee_amount), places=2)
 		self.assertAlmostEqual(ctx["summary"]["irt"], flt(slip.irt_amount), places=2)
 		self.assertAlmostEqual(ctx["summary"]["total_deductions"], flt(slip.total_deduction), places=2)

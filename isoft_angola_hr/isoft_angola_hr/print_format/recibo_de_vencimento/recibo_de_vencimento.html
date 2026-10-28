@@ -179,8 +179,9 @@
       <td class="rv-sum">
         <div class="rv-sec-title">{{ t("Summary") }}</div>
         <table class="rv-summary">
-          {#- Gross is not repeated here: it is the Total Earnings above (HR review, Sept 2026). -#}
-          <tr><td class="k">{{ t("Taxable Income") }}</td><td class="v">{{ money(r.summary.taxable) }}</td></tr>
+          {#- Gross is not repeated here: it is the Total Earnings above (HR review, Sept 2026).
+              The taxable income was dropped for the salary advance taken this month (HR, Oct 2026). -#}
+          <tr><td class="k">{{ t("Salary Advance") }}</td><td class="v">{{ money(r.summary.advance) }}</td></tr>
           <tr><td class="k">{{ t("Employee INSS") }}</td><td class="v">{{ money(r.summary.inss) }}</td></tr>
           <tr><td class="k">IRT</td><td class="v">{{ money(r.summary.irt) }}</td></tr>
           <tr><td class="k">{{ t("Total Deductions") }}</td><td class="v">{{ money(r.summary.total_deductions) }}</td></tr>
