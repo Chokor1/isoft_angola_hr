@@ -50,7 +50,7 @@
       {%- for row in memos %}
       <tr class="rv-memo">
         <td class="c-code">{{ row.code }}</td>
-        <td class="c-desc">{{ row.label }} <span class="rv-memo-tag">({{ t("informative, not included in totals") }})</span></td>
+        <td class="c-desc">{{ row.label }}</td>
         <td class="c-amt">{{ money(row.amount) }}</td>
       </tr>
       {%- endfor %}
@@ -94,6 +94,9 @@
           <tr><td class="k">{{ t("Document No.") }}</td><td class="v">{{ r.document }}</td></tr>
           <tr><td class="k">{{ t("Period") }}</td><td class="v">{{ r.period_label }}</td></tr>
           <tr><td class="k">{{ t("Issue Date") }}</td><td class="v">{{ d(r.issue_date) }}</td></tr>
+          {#- The contractual basic salary, before any absence or deduction (HR, Oct 2026):
+              the R101 line below is what is actually paid. -#}
+          <tr><td class="k">{{ t("Basic Salary") }}</td><td class="v">{{ money(r.vencimento) }}</td></tr>
         </table>
       </td>
     </tr>

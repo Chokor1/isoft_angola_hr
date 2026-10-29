@@ -473,7 +473,20 @@ class TestReceiptContent(ReceiptFixture):
 		self.assertAlmostEqual(ctx["total_earnings"], flt(slip.gross_pay), places=2)
 		text = text_of(render(slip.name, lang="pt", doc=slip))
 		self.assertIn("Falta Injustificada", text)
-		self.assertIn("informativo", text)
+		# the "(informativo, não incluído nos totais)" note was dropped (HR, Oct 2026);
+		# the row is still out of the total, asserted above
+		self.assertNotIn("informativo", text)
+
+	def test_the_header_shows_the_contractual_basic_salary(self):
+		"""HR, October 2026: the basic salary before any absence or deduction."""
+		slip = self.full_slip()
+		base = flt(frappe.db.get_value("Isoft Salary Profile", slip.salary_profile, "base"))
+		self.assertEqual(flt(recibo.get_context(slip)["vencimento"], 2), base)
+		for lang, label in (("pt", "Salário Base"), ("en", "Basic Salary")):
+			html = render(slip.name, lang=lang)
+			meta = re.search(r'(?s)<table class="rv-doc-meta">.*?</table>', html).group(0)
+			self.assertIn(label, text_of(meta), lang)
+			self.assertIn(money(base), text_of(meta), lang)
 
 
 # --------------------------------------------------------------------------- #
