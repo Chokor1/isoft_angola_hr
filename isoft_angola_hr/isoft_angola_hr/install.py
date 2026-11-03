@@ -259,6 +259,7 @@ def after_install():
 	seed_hr_controls()
 	seed_hr_catalogues()
 	setup_custom_fields()
+	setup_education_levels()
 	seed_defaults()
 	seed_absence_reasons()
 	grant_finance_read_access()
@@ -574,6 +575,29 @@ def seed_absence_reasons():
 
 def setup_custom_fields():
 	create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
+	frappe.db.commit()
+
+
+#: Levels the Employee's Education table offers on top of ERPNext's own (HR, Nov 2026).
+EDUCATION_LEVELS = ("High School",)
+
+
+def setup_education_levels():
+	"""Add the missing levels to Employee Education.level through a Property Setter, so
+	ERPNext's DocType is untouched. Levels the site already has, its own included, keep
+	their order; "Graduate" stays first, so a new row still defaults to it. A new level
+	takes its alphabetical place after the first level."""
+	options = [o for o in (frappe.get_meta("Employee Education").get_field("level").options or "").split("\n") if o]
+	missing = [lvl for lvl in EDUCATION_LEVELS if lvl not in options]
+	if not missing:
+		return
+	for lvl in missing:
+		at = next((i for i, o in enumerate(options) if i and o > lvl), len(options))
+		options.insert(at, lvl)
+	frappe.make_property_setter({
+		"doctype": "Employee Education", "doctype_or_field": "DocField", "fieldname": "level",
+		"property": "options", "value": "\n".join(options), "property_type": "Text",
+	}, validate_fields_for_doctype=False)
 	frappe.db.commit()
 
 
