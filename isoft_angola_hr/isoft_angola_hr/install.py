@@ -598,6 +598,13 @@ def setup_education_levels():
 		"doctype": "Employee Education", "doctype_or_field": "DocField", "fieldname": "level",
 		"property": "options", "value": "\n".join(options), "property_type": "Text",
 	}, validate_fields_for_doctype=False)
+	# Browsers keep the Employee form's meta in localStorage for as long as the Employee
+	# DocType's modified is unchanged, and a Property Setter on the child table does not
+	# move it: without this the dropdown keeps the old list until site data is cleared.
+	now = frappe.utils.now()
+	for dt in ("Employee", "Employee Education"):
+		frappe.db.set_value("DocType", dt, "modified", now, update_modified=False)
+		frappe.clear_cache(doctype=dt)
 	frappe.db.commit()
 
 

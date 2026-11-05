@@ -38,11 +38,19 @@ class TestEducationLevels(unittest.TestCase):
 		install.setup_education_levels()
 		self.assertEqual(levels(), ["Graduate", "High School", "Post Graduate", "Under Graduate"])
 
+	def test_browsers_drop_their_cached_employee_form(self):
+		"""The desk reuses its cached Employee meta while DocType.modified is unchanged."""
+		before = frappe.db.get_value("DocType", "Employee", "modified")
+		install.setup_education_levels()
+		self.assertGreater(frappe.db.get_value("DocType", "Employee", "modified"), before)
+
 	def test_running_it_again_changes_nothing(self):
 		install.setup_education_levels()
 		first = setters()
+		stamp = frappe.db.get_value("DocType", "Employee", "modified")
 		install.setup_education_levels()
 		self.assertEqual(setters(), first)
+		self.assertEqual(frappe.db.get_value("DocType", "Employee", "modified"), stamp)
 		self.assertEqual(len(first), 1)
 		self.assertEqual(levels().count("High School"), 1)
 
