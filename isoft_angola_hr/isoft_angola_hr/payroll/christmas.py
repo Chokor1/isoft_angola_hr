@@ -118,3 +118,21 @@ def paid_in_year(employee, year):
 		"""select ifnull(sum(subsidio_natal), 0) from `tabIsoft Salary Slip`
 		where employee=%s and docstatus=1 and run_type=%s and year(end_date)=%s""",
 		(employee, RUN_CHRISTMAS, int(year)))[0][0], 2)
+
+
+def exclusion_reason(employee, year):
+	"""Why an employee gets no bonus run slip for ``year``, or None.
+
+	:param employee: dict with name and date_of_joining
+	"""
+	from frappe import _
+
+	if bonus_months(employee.get("date_of_joining"), year) < 1:
+		return _("no complete month of service in {0}").format(year)
+	settled = frappe.db.sql_list(
+		"""select name from `tabIsoft Final Settlement`
+		where employee=%s and docstatus=1 and year(termination_date)=%s
+		  and ifnull(christmas_bonus, 0) > 0 limit 1""", (employee.get("name"), int(year)))
+	if settled:
+		return _("the Christmas bonus was paid by final settlement {0}").format(settled[0])
+	return None

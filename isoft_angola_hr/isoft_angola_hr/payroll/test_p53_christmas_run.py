@@ -134,3 +134,139 @@ class TestBonusSlip(BonusFixture):
 		with self.assertRaises(frappe.ValidationError) as ctx:
 			self.salary_slip(subsidio_natal=1000)
 		self.assertIn(bonus.name, str(ctx.exception))
+
+
+# --------------------------------------------------------------------------- #
+# The bonus run
+# --------------------------------------------------------------------------- #
+from isoft_angola_hr.isoft_angola_hr import api  # noqa: E402
+from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import _account  # noqa: E402
+from isoft_angola_hr.isoft_angola_hr.payroll.test_p2_controls import ControlFixture  # noqa: E402
+from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf  # noqa: E402
+
+
+class BonusRunFixture(BonusFixture, ControlFixture):
+	"""Bonus fixture + one user per role, the SNA account mapped, and a department that
+	holds only the fixture's bonus employees (so fill_employees sees nobody else)."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts as pa
+		cls.acc["SNA"] = _account(cls.company, PREFIX + " Subsidio de Natal", "Expense")
+		cls._created.append(("Account", cls.acc["SNA"]))
+		s = frappe.get_single("Isoft HR Settings")
+		rows = {r.abbr: r for r in s.component_accounts}
+		if "SNA" in rows:
+			rows["SNA"].account = cls.acc["SNA"]
+		else:
+			s.append("component_accounts", {"abbr": "SNA", "account": cls.acc["SNA"]})
+		with pa.unlogged_mapping():
+			s.save(ignore_permissions=True)
+		frappe.clear_cache(doctype="Isoft HR Settings")
+		last = pa.last_posted_run(cls.company)
+		cls._track(frappe.get_doc({
+			"doctype": "Isoft Payroll Account Change", "company": cls.company,
+			"account_key": pa.MAPPING_CONFIRMED, "label": PREFIX + " bonus mapping confirmation",
+			"changed_by": "Administrator", "changed_on": frappe.utils.now(),
+			"after_posting": 1 if last else 0, "posted_payroll": last.name if last else None,
+			"note": pa.mapping_snapshot(),
+		}).insert(ignore_permissions=True))
+		cls.dept = cls._department(PREFIX + " Natal")
+		frappe.db.set_value("Employee", cls.emp.name, {
+			"department": cls.dept, "custom_iban": "AO06000600000100037131174",
+			"custom_nif": "5417000001", "custom_inss_number": "0123456780"})
+
+	@classmethod
+	def _department(cls, name):
+		existing = frappe.db.get_value("Department", {"department_name": name, "company": cls.company})
+		if existing:
+			return existing
+		return cls._track(frappe.get_doc({"doctype": "Department", "department_name": name,
+		                                  "company": cls.company}).insert(ignore_permissions=True)).name
+
+	def entry(self, group="A", employees=None):
+		doc = frappe.get_doc({
+			"doctype": "Isoft Payroll Entry", "company": self.company,
+			"run_type": christmas.RUN_CHRISTMAS, "posting_date": "{0}-12-15".format(YEAR),
+			"start_date": self.bstart, "end_date": self.bend,
+			"payroll_group": "{0} bonus {1} {2}".format(PREFIX, type(self).__name__, group)[:140],
+			"department": self.dept,
+		})
+		for e in employees or ():
+			doc.append("employees", {"employee": e.name, "employee_name": e.employee_name})
+		return doc.insert(ignore_permissions=True)
+
+
+class TestBonusRun(BonusRunFixture):
+	def test_full_lifecycle(self):
+		entry = self.entry()
+		frappe.set_user(self.users["officer"])
+		self.assertEqual(entry.fill_employees(), 1)
+		entry.create_salary_slips()
+		self.assertEqual(api.payroll_action(entry.name, wf.SUBMIT_FOR_APPROVAL)["status"],
+		                 wf.PENDING_APPROVAL)
+		frappe.set_user(self.users["manager"])
+		self.assertEqual(api.payroll_action(entry.name, wf.APPROVE)["status"], wf.APPROVED)
+		frappe.set_user(self.users["finance"])
+		entry.reload()
+		entry.submit_salary_slips()
+		self.assertEqual(api.make_bulk_journal_entry(entry.name)["status"], wf.POSTED)
+		frappe.set_user("Administrator")
+
+		entry.reload()
+		slip = frappe.get_doc("Isoft Salary Slip", entry.employees[0].salary_slip)
+		self.assertEqual((slip.run_type, slip.net_pay), (christmas.RUN_CHRISTMAS, 179500.0))
+		self.assertEqual(entry.total_net_pay, 179500.0)
+		gl = frappe.get_all("Journal Entry Account", filters={"parent": slip.journal_entry},
+		                    fields=["account", "debit_in_account_currency as debit",
+		                            "credit_in_account_currency as credit"])
+		accounts = {g.account: (g.debit, g.credit) for g in gl}
+		self.assertEqual(accounts[self.acc["SNA"]], (200000.0, 0.0))
+		self.assertEqual(accounts[self.acc["IRT"]], (0.0, 20500.0))
+		for abbr in ("CTSS3", "CTSSE", "CTSSP"):
+			self.assertNotIn(self.acc[abbr], accounts, abbr)
+
+	def test_second_bonus_run_same_year_refused(self):
+		self.entry()
+		with self.assertRaises(frappe.ValidationError):
+			self.entry()
+
+	def test_salary_run_for_december_still_allowed(self):
+		bonus = self.entry()
+		salary = frappe.get_doc({
+			"doctype": "Isoft Payroll Entry", "company": self.company,
+			"posting_date": self.bend, "start_date": self.bstart, "end_date": self.bend,
+			"payroll_group": bonus.payroll_group,
+		}).insert(ignore_permissions=True)
+		self.assertEqual(salary.run_type, christmas.RUN_SALARY)
+		slip = self.salary_slip(payroll_entry=salary.name)
+		self.assertNotIn("SNA", [e.abbr for e in slip.earnings])
+		self.assertTrue(slip.ss_employee_amount)
+		frappe.delete_doc("Isoft Payroll Entry", salary.name, force=True, ignore_permissions=True)
+
+	def test_december_second_hire_is_excluded_first_is_included(self):
+		first = self.new_employee("Dez Um", "{0}-12-01".format(YEAR), 400000)
+		second = self.new_employee("Dez Dois", "{0}-12-02".format(YEAR), 400000)
+		suspended = self.new_employee("Suspenso", "2021-01-01", 400000, status="Suspended")
+		for e in (first, second, suspended):
+			frappe.db.set_value("Employee", e.name, "department", self.dept)
+			self.addCleanup(frappe.db.set_value, "Employee", e.name, "department", None)
+		entry = self.entry()
+		entry.fill_employees()
+		listed = {r.employee for r in entry.employees}
+		self.assertIn(first.name, listed)
+		self.assertIn(suspended.name, listed)
+		self.assertNotIn(second.name, listed)
+		entry.create_salary_slips()
+		entry.reload()
+		months = {r.employee: frappe.db.get_value("Isoft Salary Slip", r.salary_slip, "natal_months")
+		          for r in entry.employees}
+		self.assertEqual(months[first.name], 1)
+
+	def test_cancel_and_amend_one_bonus_slip(self):
+		slip = self.bonus_slip(submit=True)
+		self.cancel_slip(slip)
+		amended = self.bonus_slip(run=slip.payroll_entry, submit=True, amended_from=slip.name)
+		self.assertEqual(amended.docstatus, 1)
+		self.assertEqual(amended.net_pay, 179500.0)

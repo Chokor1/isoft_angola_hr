@@ -17,6 +17,7 @@ from frappe.utils import cint, flt, getdate
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import (
 	get_active_profile,
 )
+from isoft_angola_hr.isoft_angola_hr.payroll import christmas
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 from isoft_angola_hr.isoft_angola_hr.services import permissions as perms
 
@@ -48,10 +49,31 @@ class IsoftPayrollEntry(Document):
 		Two entries covering the same period could each generate and submit slips, and the
 		second run would pay everybody a second time. The group field is the escape hatch
 		for a company that genuinely runs separate payrolls (e.g. expatriates) in one period.
+
+		The Christmas bonus run shares the December salary run's period, so the rule is per
+		run type: one salary run per period, one Christmas bonus run per year.
 		"""
+		self.run_type = self.run_type or christmas.RUN_SALARY
+		if self.run_type == christmas.RUN_CHRISTMAS:
+			year = getdate(self.end_date).year
+			clash = frappe.db.sql(
+				"""select name, status from `tabIsoft Payroll Entry`
+				where company=%s and run_type=%s and year(end_date)=%s
+				  and ifnull(payroll_group,'')=%s and ifnull(status,'Draft')!='Cancelled'
+				  and name!=%s limit 1""",
+				(self.company, self.run_type, year, self.payroll_group or "", self.name or ""),
+				as_dict=True)
+			if clash:
+				frappe.throw(
+					_("Christmas bonus run {0} ({1}) already exists for {2} in {3}. Cancel it "
+					  "before creating another.").format(
+						frappe.bold(clash[0].name), _(clash[0].status or wf.DRAFT), year, self.company),
+					title=_("Duplicate Payroll Run"))
+			return
 		clash = frappe.db.sql(
 			"""select name, status from `tabIsoft Payroll Entry`
 			where company=%s and start_date=%s and end_date=%s
+			  and ifnull(run_type,'Salary')='Salary'
 			  and ifnull(payroll_group,'')=%s and ifnull(status,'Draft')!='Cancelled'
 			  and name!=%s limit 1""",
 			(self.company, getdate(self.start_date), getdate(self.end_date),
@@ -83,16 +105,27 @@ class IsoftPayrollEntry(Document):
 		perms.require_action_and_company(perms.PAYROLL_PREPARE, self.company)
 		wf.assert_transition(self, wf.CALCULATE)
 
-		filters = {"status": "Active", "company": self.company}
+		bonus = self.run_type == christmas.RUN_CHRISTMAS
+		# Suspended employees are kept on the bonus run: the app records no suspension
+		# dates, so HR adjusts them by hand (the preview flags them).
+		filters = {"status": ("in", ("Active", "Suspended")) if bonus else "Active",
+		           "company": self.company}
 		for f in ("branch", "department", "designation"):
 			if self.get(f):
 				filters[f] = self.get(f)
 
-		employees = frappe.get_all("Employee", filters=filters, fields=["name", "employee_name"])
+		employees = frappe.get_all("Employee", filters=filters,
+		                           fields=["name", "employee_name", "date_of_joining"])
 		self.set("employees", [])
 		count = 0
 		skipped = []
+		year = getdate(self.end_date).year
 		for emp in employees:
+			if bonus:
+				reason = christmas.exclusion_reason(emp, year)
+				if reason:
+					skipped.append("{0}: {1}".format(emp.employee_name or emp.name, reason))
+					continue
 			# Resolved through get_active_profile so an ambiguous salary is reported here
 			# rather than silently resolved by arbitrary row order.
 			try:
@@ -113,8 +146,7 @@ class IsoftPayrollEntry(Document):
 		self.number_of_employees = count
 		if skipped:
 			frappe.msgprint(
-				_("{0} employee(s) were excluded because their salary could not be "
-				  "resolved:<br>{1}").format(len(skipped), "<br>".join(skipped)),
+				_("{0} employee(s) were excluded:<br>{1}").format(len(skipped), "<br>".join(skipped)),
 				title=_("Employees Excluded"), indicator="orange",
 			)
 		return count
@@ -135,7 +167,7 @@ class IsoftPayrollEntry(Document):
 			existing = frappe.db.exists(
 				"Isoft Salary Slip",
 				{"employee": row.employee, "start_date": self.start_date, "end_date": self.end_date,
-				 "docstatus": ("<", 2)},
+				 "run_type": self.run_type or christmas.RUN_SALARY, "docstatus": ("<", 2)},
 			)
 			if existing:
 				row.salary_slip = existing
@@ -148,6 +180,7 @@ class IsoftPayrollEntry(Document):
 				"start_date": self.start_date,
 				"end_date": self.end_date,
 				"payroll_entry": self.name,
+				"run_type": self.run_type or christmas.RUN_SALARY,
 				"salary_profile": row.salary_profile,
 				"productivity_bonus": flt(row.productivity_bonus),
 				"overtime_hours": row.overtime_hours,
