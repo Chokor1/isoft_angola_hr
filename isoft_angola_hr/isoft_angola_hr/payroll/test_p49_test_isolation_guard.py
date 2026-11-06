@@ -29,6 +29,7 @@ READ_ONLY = {
 	"test_p37_runtime_language.py": "translation lookups only",
 	"test_p48_overtime.py": "pure formula classes; its payroll class is a PayrollFixture",
 	"test_p49_test_isolation_guard.py": "this module",
+	"test_p52_christmas_formula.py": "pure bonus arithmetic and IRT table reads",
 }
 
 
