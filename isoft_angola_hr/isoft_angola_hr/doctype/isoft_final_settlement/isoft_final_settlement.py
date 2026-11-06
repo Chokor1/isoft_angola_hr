@@ -22,7 +22,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cint, flt, getdate, now_datetime
 
-from isoft_angola_hr.isoft_angola_hr.payroll import engine, settlement
+from isoft_angola_hr.isoft_angola_hr.payroll import christmas, engine, settlement
 from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
 
 #: Statuses from which HR may still edit and recompute.
@@ -77,6 +77,11 @@ class IsoftFinalSettlement(Document):
 			"fixed_term_under_one_year": cint(self.fixed_term_under_one_year),
 			"ferias_rate": flt(self.ferias_rate),
 			"natal_rate": flt(self.natal_rate),
+			# the Christmas bonus a bonus run already paid this year (deducted, never below 0)
+			"christmas_bonus_paid": christmas.paid_in_year(
+				self.employee, getdate(self.termination_date).year) if self.termination_date else 0.0,
+			"christmas_bonus_slips": christmas.bonus_slips_in_year(
+				self.employee, getdate(self.termination_date).year) if self.termination_date else [],
 			"supplement_months_override": self.supplement_months_override or None,
 			"seniority_years_override": self.seniority_years_override or None,
 			# Gathered here, not inside compute(): compute() is a pure function of its

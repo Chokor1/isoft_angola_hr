@@ -3028,3 +3028,5 @@
 "Salary slip {0} is a {1} slip but payroll {2} is a {3} run.","O recibo {0} é do tipo {1} mas o processamento {2} é do tipo {3}."
 "Christmas Bonus Receipt","Recibo de Subsídio de Natal","Recibo de Vencimento"
 "Christmas Bonus - {0}/12","Subsídio de Natal - {0}/12","Recibo de Vencimento"
+"already paid","já pago"
+"{0} already paid by Christmas bonus slip {1}; {2} remains due.","{0} já pago pelo recibo de Subsídio de Natal {1}; falta pagar {2}."

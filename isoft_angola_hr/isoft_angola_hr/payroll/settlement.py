@@ -253,9 +253,12 @@ def collect_unpaid_overtime(employee, company, base, period_start, termination_d
 	term = getdate(termination_date)
 
 	# Everything the last submitted slip covered is already paid for.
+	# Salary slips only: a Christmas bonus slip shares the December salary period but pays
+	# no overtime, so it must not mark December's overtime as paid.
 	last_paid = frappe.db.sql(
 		"""select max(end_date) from `tabIsoft Salary Slip`
-		where employee = %s and docstatus = 1""", employee)[0][0]
+		where employee = %s and docstatus = 1 and ifnull(run_type, 'Salary') = 'Salary'""",
+		employee)[0][0]
 	start = add_days(getdate(last_paid), 1) if last_paid else getdate(period_start or term)
 	if start > term:
 		start = term
@@ -474,10 +477,25 @@ def _supplement_lines(inp, flags):
 					             label, rate, minimum)})
 		annual = base * rate / 100.0
 		amount = _r2(annual * months / 12.0)
+		formula = "{0} × {1}% × {2}/12".format(_money(base), _money(rate), months)
+		formula_check = None
+		paid_note = ""
+		paid = _r2(inp.get("christmas_bonus_paid")) if key == "christmas_bonus" else 0.0
+		if paid:
+			# Already paid this year by a Christmas bonus run (payroll/christmas.py, HR
+			# November 2026): only the remainder is due, never less than zero, and nothing
+			# is clawed back. The line itself is reduced — a separate negative line would
+			# leave the paid bonus in the IRT and INSS bases and tax it a second time.
+			due = _r2(max(0.0, amount - paid))
+			formula_check = "{0} - {1}".format(formula, _money(paid)) if due else None
+			formula = "{0} − {1} ({2})".format(formula, _money(paid), _("already paid"))
+			paid_note = " " + _("{0} already paid by Christmas bonus slip {1}; {2} remains due.").format(
+				_money(paid), ", ".join(inp.get("christmas_bonus_slips") or []) or "—", _money(due))
+			amount = due
 		lines.append(_line(
 			SEC_SUPPLEMENTS, label, amount,
 			"law" if rate == minimum else "company",
-			formula="{0} × {1}% × {2}/12".format(_money(base), _money(rate), months),
+			formula=formula, formula_check=formula_check,
 			article=art,
 			note=_("{0} complete months worked from {1} to {2}. Artigo 238.º n.º 3 makes "
 			       "the supplement proportional to complete months when a full year of "
@@ -485,7 +503,7 @@ def _supplement_lines(inp, flags):
 				       months, window_start, term,
 				       "" if rate == minimum else _(" The percentage is above the "
 				                                    "statutory minimum — a contractual "
-				                                    "or collective enhancement.")),
+				                                    "or collective enhancement.")) + paid_note,
 			irt=True,
 			# Decreto Presidencial n.º 227/18 artigo 13.º excludes the subsídio de férias
 			# from the contribution base; the Christmas bonus is not excluded. This is

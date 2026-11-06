@@ -397,3 +397,45 @@ class TestBonusReceipt(BonusFixture):
 		from isoft_angola_hr.isoft_angola_hr.payroll import recibo
 		slip = self.bonus_slip()
 		self.assertEqual(recibo._issue_date(slip), getdate("{0}-12-15".format(YEAR)))
+
+
+class TestSettlementAfterBonus(BonusFixture):
+	"""A leaver's settlement deducts the Christmas bonus already paid (never below zero)."""
+
+	def compute(self, **overrides):
+		from isoft_angola_hr.isoft_angola_hr.payroll import settlement as fs
+		from isoft_angola_hr.isoft_angola_hr.payroll.test_p7_settlement import scenario
+		data = scenario(base=400000.0, joining_date="2020-03-01", **overrides)
+		data.setdefault("company", self.company)
+		res = fs.compute(data)
+		return [ln for ln in res["lines"] if ln["key"] == "christmas_bonus"][0], res
+
+	def test_a_full_bonus_paid_leaves_nothing_due(self):
+		line, res = self.compute(termination_date="{0}-12-20".format(YEAR),
+		                         period_start="{0}-11-23".format(YEAR), period_end="{0}-12-20".format(YEAR),
+		                         christmas_bonus_paid=200000.0, christmas_bonus_slips=["ISN-X-2026"])
+		self.assertEqual(line["amount"], 0.0)
+		self.assertIn("ISN-X-2026", line["note"])
+		self.assertTrue(all(ln["amount"] >= 0 for ln in res["lines"]))
+
+	def test_a_partial_bonus_pays_the_difference(self):
+		line, _res = self.compute(termination_date="{0}-10-15".format(YEAR),
+		                          period_start="{0}-09-23".format(YEAR), period_end="{0}-10-15".format(YEAR),
+		                          christmas_bonus_paid=133333.33, christmas_bonus_slips=["ISN-X-2026"])
+		self.assertEqual(line["amount"], 16666.67)
+
+	def test_without_a_bonus_nothing_changes(self):
+		line, _res = self.compute(termination_date="{0}-10-15".format(YEAR),
+		                          period_start="{0}-09-23".format(YEAR), period_end="{0}-10-15".format(YEAR))
+		self.assertEqual(line["amount"], 150000.0)
+
+	def test_a_bonus_slip_does_not_mark_december_overtime_as_paid(self):
+		from isoft_angola_hr.isoft_angola_hr.payroll import settlement as fs
+		self.bonus_slip(submit=True)
+		got = fs.collect_unpaid_overtime(self.emp.name, self.company, 400000.0,
+		                                 "{0}-11-23".format(YEAR), "{0}-12-20".format(YEAR))
+		self.assertEqual(got["window_start"], "{0}-11-23".format(YEAR))
+
+	def test_the_settlement_document_reads_the_bonus_paid(self):
+		self.bonus_slip(submit=True)
+		self.assertEqual(christmas.paid_in_year(self.emp.name, YEAR), 200000.0)
