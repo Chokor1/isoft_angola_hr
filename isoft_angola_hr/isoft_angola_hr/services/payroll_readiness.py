@@ -303,6 +303,10 @@ def _previous_period_slips(company, start, end):
 	return {r.employee: r for r in rows}, (getdate(prev_start), getdate(prev_end))
 
 
+#: Exceptions about the period's salary run that do not apply to a Christmas bonus run.
+SALARY_ONLY = ("EXC-003", "EXC-004", "EXC-011", "EXC-012")
+
+
 def _existing_slips(company, start, end):
 	"""Every live slip overlapping this period, keyed by employee — one query for the
 	whole company instead of one per employee."""

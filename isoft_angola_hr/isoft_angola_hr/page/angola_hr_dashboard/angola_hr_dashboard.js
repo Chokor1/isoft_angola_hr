@@ -4712,15 +4712,16 @@ class AngolaHR {
 			$w.html(this.panel(__("Preview"), `<div class="ahr-empty">${__("No employees are due a Christmas bonus for the selected filters.")}</div>`));
 			return;
 		}
-		const open = rows.filter((r) => !r.already && !r.blocked);
+		const open = rows.filter((r) => !r.already && !r.blocked && !r.excluded);
 		const total = open.reduce((s, r) => s + flt(r.net), 0);
 		const body = rows.map((r) => {
 			const lock = r.already || r.blocked;
 			const changed = !r.blocked && flt(r.christmas) !== flt(r.christmas_default);
 			const name = `${esc(r.employee_name || r.employee)}${r.suspended ? ` <span class="indicator-pill orange">${__("Suspended")}</span>` : ""}`;
-			if (r.blocked) {
+			if (r.blocked || r.excluded) {
+				// excluded: no bonus is due (e.g. no complete month, already paid); blocked: a data problem
 				return `<tr data-emp="${esc(r.employee)}" class="pv-off"><td class="pv-c"><input type="checkbox" class="pv-include" disabled></td>
-					<td>${name}</td><td colspan="6" class="text-danger">${esc(r.exception || "")}</td></tr>`;
+					<td>${name}</td><td colspan="6" class="${r.blocked ? "text-danger" : "text-muted"}">${r.excluded ? `${__("Not due")}: ` : ""}${esc(r.exception || "")}</td></tr>`;
 			}
 			return `<tr data-emp="${esc(r.employee)}" data-default="${flt(r.christmas_default)}" class="${lock ? "pv-off" : ""}">
 				<td class="pv-c"><input type="checkbox" class="pv-include" ${lock ? "disabled" : "checked"}></td>

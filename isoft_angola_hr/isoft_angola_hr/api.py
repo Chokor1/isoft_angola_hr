@@ -1381,7 +1381,7 @@ def _create_christmas_run(company, year, rows, posting_date=None):
 	entry.posting_date = getdate(posting_date) if posting_date else getdate("{0}-12-15".format(year))
 	for r in rows:
 		calc = fresh.get(r.get("employee"))
-		if not calc:
+		if not calc or calc.get("excluded") or calc.get("blocked"):
 			frappe.throw(_("{0} is not eligible for the {1} Christmas bonus.").format(
 				frappe.bold(r.get("employee_name") or r.get("employee")), year))
 		changed = christmas.check_override(r, calc["christmas_default"], calc["christmas_max"])

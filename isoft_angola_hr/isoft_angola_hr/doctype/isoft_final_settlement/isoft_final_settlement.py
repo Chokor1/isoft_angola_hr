@@ -214,6 +214,17 @@ class IsoftFinalSettlement(Document):
 			if res["blocking"]:
 				frappe.throw(_("This settlement cannot be finalised yet: {0}").format(
 					" ".join(f["message"] for f in res["blocking"])))
+			# A Christmas bonus run may have paid the bonus after this draft was last
+			# calculated: finalising the old figure would pay it twice.
+			fresh = flt(sum(ln["amount"] for ln in res["lines"] if ln["key"] == "christmas_bonus"), 2)
+			if abs(fresh - flt(self.christmas_bonus, 2)) > 0.01:
+				frappe.throw(_("The Christmas bonus of this settlement is out of date: it shows {0}, "
+				               "but {1} is due now that a Christmas bonus run has paid {2}. Save "
+				               "the settlement again to recalculate it before finalising.").format(
+					frappe.utils.fmt_money(self.christmas_bonus, 2), frappe.utils.fmt_money(fresh, 2),
+					frappe.utils.fmt_money(christmas.paid_in_year(
+						self.employee, getdate(self.termination_date).year), 2)),
+					title=_("Christmas Bonus Changed"))
 		if self.workflow_status not in ("Approved", "Draft", None, ""):
 			return
 		if not self.workflow_status:

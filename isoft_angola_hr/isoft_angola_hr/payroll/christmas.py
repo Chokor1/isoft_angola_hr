@@ -112,6 +112,16 @@ def bonus_slips_in_year(employee, year, exclude=None):
 		order by name""", (employee, RUN_CHRISTMAS, int(year), exclude or ""))
 
 
+def salary_slips_with_natal(employee, year):
+	"""Submitted SALARY slips of ``year`` that already paid a Christmas bonus (typed by
+	hand, or from before the bonus had a run of its own)."""
+	return frappe.db.sql_list(
+		"""select name from `tabIsoft Salary Slip`
+		where employee=%s and docstatus=1 and ifnull(run_type, 'Salary')='Salary'
+		  and year(end_date)=%s and ifnull(subsidio_natal, 0) > 0 order by name""",
+		(employee, int(year)))
+
+
 def paid_in_year(employee, year):
 	"""The Christmas bonus already paid to the employee for ``year`` by bonus runs."""
 	return flt(frappe.db.sql(
@@ -129,6 +139,9 @@ def exclusion_reason(employee, year):
 
 	if bonus_months(employee.get("date_of_joining"), year) < 1:
 		return _("no complete month of service in {0}").format(year)
+	on_salary = salary_slips_with_natal(employee.get("name"), year)
+	if on_salary:
+		return _("the Christmas bonus was paid on salary slip {0}").format(on_salary[0])
 	settled = frappe.db.sql_list(
 		"""select name from `tabIsoft Final Settlement`
 		where employee=%s and docstatus=1 and year(termination_date)=%s
@@ -169,6 +182,9 @@ def preview_rows(company, year, department=None, branch=None, designation=None, 
 		       "blocked": 0, "exception": None}
 		reason = exclusion_reason(e, year)
 		if reason:
+			# listed, locked, with the reason — never silently missing
+			row.update(excluded=1, exception=reason)
+			out.append(row)
 			continue
 		try:
 			prof = _profile(e, end, company)
@@ -208,7 +224,12 @@ def check_override(row, default, ceiling=None):
 	from frappe import _
 
 	amount = flt(row.get("christmas"), 2)
-	if ceiling is not None and (amount < 0 or amount > flt(ceiling, 2)):
+	if amount <= 0:
+		frappe.throw(_("The Christmas bonus for {0} must be more than zero. To pay nothing, "
+		               "untick the employee instead.").format(
+			frappe.bold(row.get("employee_name") or row.get("employee"))),
+			title=_("Invalid Christmas Bonus"))
+	if ceiling is not None and amount > flt(ceiling, 2):
 		frappe.throw(_("The Christmas bonus for {0} cannot exceed a full year's bonus ({1}).").format(
 			frappe.bold(row.get("employee_name") or row.get("employee")),
 			frappe.utils.fmt_money(ceiling, 2)), title=_("Christmas Bonus Too High"))

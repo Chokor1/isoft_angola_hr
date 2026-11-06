@@ -496,6 +496,11 @@ def _readiness_blockers(company, entry=None, period=None, report=None):
 		if entry is not None:
 			members = {r.employee for r in entry.get("employees") or []}
 			exceptions = [e for e in exceptions if not e.get("employee") or e["employee"] in members]
+			if entry.get("run_type") == "Christmas Bonus":
+				# Working days, the month's net, a mid-period salary change and "already
+				# processed" are about the salary run of the period; the bonus slip has its
+				# own checks (one bonus a year, the profile, the ceiling).
+				exceptions = [e for e in exceptions if e.get("code") not in readiness.SALARY_ONLY]
 		return exceptions
 	# No preview permission: counts only.
 	from isoft_angola_hr.isoft_angola_hr.services import production_readiness as pr

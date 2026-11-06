@@ -179,9 +179,13 @@ def approval_blockers(entry, readiness_report=None):
 		strays = frappe.db.sql(
 			"""select name, employee_name, payroll_entry, docstatus from `tabIsoft Salary Slip`
 			where company = %s and start_date = %s and end_date = %s and docstatus < 2
+			  and ifnull(run_type, 'Salary') = %s
 			  and employee in ({0}) and name not in ({1})""".format(
 				placeholders, ", ".join(["%s"] * len(listed)) if listed else "''"),
-			[company, start, end] + list(members) + list(listed), as_dict=True)
+			# the Christmas bonus run shares December's period: only a slip of the same
+			# run type is a second payment
+			[company, start, end, entry.get("run_type") or "Salary"] + list(members) + list(listed),
+			as_dict=True)
 		if strays:
 			out.append(_blocker(
 				"APR-006", PAYROLL,

@@ -303,13 +303,21 @@ class IsoftPayrollEntry(Document):
 			"finance": wf.finance_flags(self),
 		}
 
-	def previous_entry_totals(self):
-		"""Totals of the previous payroll run of the same company, for the difference line."""
+	def previous_entry(self):
+		"""The previous payroll run of the same company and run type: a salary run is
+		compared with the last salary run, never with a Christmas bonus."""
 		prev = frappe.db.sql(
 			"""select name from `tabIsoft Payroll Entry`
 			where company=%s and end_date < %s and ifnull(status,'Draft') not in ('Cancelled','Draft')
+			  and ifnull(run_type,'Salary') = %s and name != %s
 			order by end_date desc limit 1""",
-			(self.company, getdate(self.start_date)), as_dict=True)
+			(self.company, getdate(self.start_date), self.run_type or christmas.RUN_SALARY,
+			 self.name or ""), as_dict=True)
+		return prev[0].name if prev else None
+
+	def previous_entry_totals(self):
+		"""Totals of the previous payroll run of the same company, for the difference line."""
+		prev = self.previous_entry()
 		if not prev:
 			return None
-		return wf.compute_totals(frappe.get_doc("Isoft Payroll Entry", prev[0].name))
+		return wf.compute_totals(frappe.get_doc("Isoft Payroll Entry", prev))

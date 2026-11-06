@@ -503,3 +503,112 @@ class TestReportsAndFilings(BonusFixture):
 		                       employee=self.emp.name)
 		data = inss_contribution_report.execute(filters)[1]
 		self.assertEqual(len([d for d in data if d.get("employee") == self.emp.name]), 1)
+
+
+# --------------------------------------------------------------------------- #
+# Final review (2026-11-06): December salary and bonus runs side by side
+# --------------------------------------------------------------------------- #
+class TestDecemberSideBySide(BonusRunFixture):
+	def salary_entry(self):
+		doc = frappe.get_doc({
+			"doctype": "Isoft Payroll Entry", "company": self.company,
+			"posting_date": self.bend, "start_date": self.bstart, "end_date": self.bend,
+			"payroll_group": "{0} bonus {1} salary".format(PREFIX, type(self).__name__)[:140],
+			"employees": [{"employee": self.emp.name, "employee_name": self.emp.employee_name}],
+		}).insert(ignore_permissions=True)
+		frappe.set_user(self.users["officer"])
+		doc.create_salary_slips()
+		frappe.set_user("Administrator")
+		doc.reload()
+		return doc
+
+	def approve(self, entry):
+		frappe.set_user(self.users["officer"])
+		api.payroll_action(entry.name, wf.SUBMIT_FOR_APPROVAL)
+		frappe.set_user(self.users["manager"])
+		status = api.payroll_action(entry.name, wf.APPROVE)["status"]
+		frappe.set_user("Administrator")
+		return status
+
+	def test_the_december_salary_run_is_approvable_after_the_bonus(self):
+		self.posted_bonus_run()
+		salary = self.salary_entry()
+		self.assertEqual(self.approve(salary), wf.APPROVED)
+		slip = frappe.get_doc("Isoft Salary Slip", salary.employees[0].salary_slip)
+		self.assertNotIn("SNA", [e.abbr for e in slip.earnings])
+		self.assertTrue(slip.ss_employee_amount)
+
+	def test_the_bonus_run_is_approvable_after_the_december_salary(self):
+		salary = self.salary_entry()
+		self.assertEqual(self.approve(salary), wf.APPROVED)
+		self.assertEqual(self.posted_bonus_run().status, wf.POSTED)
+
+	def test_the_approver_compares_with_the_previous_run_of_the_same_type(self):
+		bonus = self.posted_bonus_run()
+		salary = self.salary_entry()
+		self.approve(salary)
+		start, end = api._period_for_month("{0}-01".format(YEAR + 1))
+		january = frappe.get_doc({
+			"doctype": "Isoft Payroll Entry", "company": self.company, "posting_date": end,
+			"start_date": start, "end_date": end,
+			"payroll_group": "{0} bonus {1} january".format(PREFIX, type(self).__name__)[:140],
+		}).insert(ignore_permissions=True)
+		self.assertEqual(january.previous_entry(), salary.name)
+		self.assertNotEqual(bonus.previous_entry(), salary.name)
+
+
+class TestNoSecondBonus(BonusRunFixture):
+	def test_a_bonus_paid_on_a_salary_slip_blocks_the_bonus_slip(self):
+		salary = self.salary_slip(submit=True, subsidio_natal=50000)
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			self.bonus_slip()
+		self.assertIn(salary.name, str(ctx.exception))
+
+	def test_and_the_preview_lists_the_employee_as_excluded(self):
+		self.salary_slip(submit=True, subsidio_natal=50000)
+		row = {r["employee"]: r for r in christmas.preview_rows(self.company, YEAR, department=self.dept)}[self.emp.name]
+		self.assertTrue(row["excluded"])
+		self.assertIn("ISS-", row["exception"])
+
+	def test_a_december_second_hire_is_listed_as_excluded_in_the_preview(self):
+		late = self.new_employee("Dez Dois", "{0}-12-02".format(YEAR), 400000)
+		frappe.db.set_value("Employee", late.name, "department", self.dept)
+		self.addCleanup(frappe.db.set_value, "Employee", late.name, "department", None)
+		rows = {r["employee"]: r for r in christmas.preview_rows(self.company, YEAR, department=self.dept)}
+		self.assertTrue(rows[late.name]["excluded"])
+		self.assertFalse(rows[late.name].get("christmas"))
+		with self.assertRaises(frappe.ValidationError):
+			api.create_payroll_from_preview(self.company, None, None, frappe.as_json([rows[late.name]]),
+			                                run_type=christmas.RUN_CHRISTMAS, year=YEAR)
+
+	def test_a_zero_override_is_refused(self):
+		with self.assertRaises(frappe.ValidationError):
+			christmas.check_override({"employee": self.emp.name, "christmas": 0,
+			                          "override_reason": "suspended"}, 200000.0, 200000.0)
+		with self.assertRaises(frappe.ValidationError):
+			self.bonus_slip(subsidio_natal=0, natal_override_reason="suspended")
+
+
+from isoft_angola_hr.isoft_angola_hr.payroll.test_p7_settlement import SettlementFixture  # noqa: E402
+
+
+class TestSettlementDraftedBeforeTheBonus(SettlementFixture):
+	def test_submitting_a_stale_settlement_is_refused(self):
+		frappe.db.set_value("Isoft HR Settings", None, "enable_natal", 1)
+		frappe.clear_cache(doctype="Isoft HR Settings")
+		doc = self.make_settlement(termination_date="{0}-12-20".format(YEAR),
+		                           period_start="{0}-11-23".format(YEAR), period_end="{0}-12-20".format(YEAR))
+		self.assertGreater(doc.christmas_bonus, 0)
+		bstart, bend = christmas.bonus_period(YEAR)
+		run = frappe.get_doc({
+			"doctype": "Isoft Payroll Entry", "company": self.company, "run_type": christmas.RUN_CHRISTMAS,
+			"posting_date": "{0}-12-15".format(YEAR), "start_date": bstart, "end_date": bend,
+			"payroll_group": "{0} stale settlement".format(PREFIX)}).insert(ignore_permissions=True)
+		self._created.append(("Isoft Payroll Entry", run.name))
+		self.insert_slip({"employee": self.employee.name, "run_type": christmas.RUN_CHRISTMAS,
+		                  "posting_date": "{0}-12-15".format(YEAR), "start_date": bstart,
+		                  "end_date": bend, "payroll_entry": run.name}, submit=True)
+		doc.reload()
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			doc.submit()
+		self.assertIn("Christmas", str(ctx.exception))

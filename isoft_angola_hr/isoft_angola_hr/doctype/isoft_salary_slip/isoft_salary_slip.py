@@ -127,6 +127,14 @@ class IsoftSalarySlip(Document):
 		slip of the same employee and year.
 		"""
 		if self.is_bonus():
+			on_salary = christmas.salary_slips_with_natal(self.employee, getdate(self.end_date).year)
+			if on_salary:
+				frappe.throw(
+					_("{0} was already paid a Christmas bonus for {1} on salary slip {2}. It "
+					  "cannot be paid again by the Christmas bonus run.").format(
+						frappe.bold(self.employee_name or self.employee),
+						getdate(self.end_date).year, on_salary[0]),
+					title=_("Duplicate Christmas Bonus"))
 			others = christmas.bonus_slips_in_year(self.employee, getdate(self.end_date).year,
 			                                       exclude=self.name)
 			if others:
@@ -389,7 +397,12 @@ class IsoftSalarySlip(Document):
 		if (self.natal_override_reason or "").strip():
 			override = flt(self.subsidio_natal)
 			ceiling = christmas.full_year_amount(profile.base, settings.natal_rate)
-			if override < 0 or override > ceiling:
+			if override <= 0:
+				frappe.throw(_("The Christmas bonus for {0} must be more than zero. To pay "
+				               "nothing, leave the employee out of the run.").format(
+					frappe.bold(self.employee_name or self.employee)),
+					title=_("Invalid Christmas Bonus"))
+			if override > ceiling:
 				frappe.throw(_("The Christmas bonus for {0} cannot exceed a full year's bonus "
 				               "({1}).").format(frappe.bold(self.employee_name or self.employee),
 				                                frappe.utils.fmt_money(ceiling, 2)),
