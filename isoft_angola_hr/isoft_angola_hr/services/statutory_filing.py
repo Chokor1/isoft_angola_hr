@@ -70,21 +70,53 @@ DISCLAIMER = (
 )
 
 
-def _slips(company, period_start, period_end):
-	return frappe.db.sql(
-		"""select s.name, s.employee, s.employee_name, e.custom_nif as nif,
+_SLIP_FIELDS = """s.name, s.employee, s.employee_name, e.custom_nif as nif,
 			e.custom_inss_number as inss_number, e.department, e.designation,
 			e.date_of_joining, e.relieving_date,
 			s.start_date, s.end_date, s.payment_days, s.total_working_days,
 			s.gross_pay, s.taxable_income, s.irt_amount, s.irt_rate, s.irt_parcela_fixa,
 			s.ss_base, s.ss_employee_rate, s.ss_employee_amount,
-			s.ss_employer_rate, s.ss_employer_amount, s.net_pay
+			s.ss_employer_rate, s.ss_employer_amount, s.net_pay, s.subsidio_natal"""
+
+
+def _query(company, period_start, period_end, run_type):
+	return frappe.db.sql(
+		"""select {0}
 		from `tabIsoft Salary Slip` s
 		left join `tabEmployee` e on e.name = s.employee
-		where s.docstatus = 1 and s.company = %s
+		where s.docstatus = 1 and s.company = %s and ifnull(s.run_type, 'Salary') = %s
 		  and s.start_date >= %s and s.end_date <= %s
-		order by e.department, s.employee_name""",
-		(company, period_start, period_end), as_dict=True)
+		order by e.department, s.employee_name""".format(_SLIP_FIELDS),
+		(company, run_type, period_start, period_end), as_dict=True)
+
+
+def _slips(company, period_start, period_end, submission_type=None):
+	"""One row per employee for the period: the salary slip, plus — on the IRT map — the
+	Christmas bonus slip of the same period in its own columns (HR, November 2026: one
+	row per employee, the bonus and its IRT next to the salary). The bonus carries no
+	INSS, so the INSS map is salary slips only. An employee paid the bonus but no salary
+	in the period gets a row with the salary figures at zero."""
+	rows = _query(company, period_start, period_end, "Salary")
+	for row in rows:
+		row.natal_amount, row.natal_irt = 0.0, 0.0
+	if submission_type == INSS:
+		return rows
+	by_employee = {r.employee: r for r in rows}
+	for bonus in _query(company, period_start, period_end, "Christmas Bonus"):
+		row = by_employee.get(bonus.employee)
+		if row is None:
+			row = frappe._dict(bonus)
+			for field in ("payment_days", "total_working_days", "gross_pay", "taxable_income",
+			              "irt_amount", "irt_rate", "irt_parcela_fixa", "ss_base",
+			              "ss_employee_rate", "ss_employee_amount", "ss_employer_rate",
+			              "ss_employer_amount", "net_pay"):
+				row[field] = 0
+			row.natal_amount, row.natal_irt = 0.0, 0.0
+			rows.append(row)
+			by_employee[bonus.employee] = row
+		row.natal_amount = flt(row.natal_amount) + flt(bonus.subsidio_natal)
+		row.natal_irt = flt(row.natal_irt) + flt(bonus.irt_amount)
+	return rows
 
 
 def validate_period(submission_type, company, period_start=None, period_end=None):
@@ -94,7 +126,7 @@ def validate_period(submission_type, company, period_start=None, period_end=None
 	period_start = getdate(period_start or get_first_day(nowdate()))
 	period_end = getdate(period_end or get_last_day(period_start))
 
-	rows = _slips(company, period_start, period_end)
+	rows = _slips(company, period_start, period_end, submission_type)
 	errors, warnings = [], []
 
 	if not rows:
@@ -108,7 +140,7 @@ def validate_period(submission_type, company, period_start=None, period_end=None
 			if not (row.nif or "").strip():
 				errors.append({"code": "STF-001", "employee": row.employee,
 				               "message": _("{0} has no NIF.").format(who)})
-			if flt(row.gross_pay) <= 0:
+			if flt(row.gross_pay) <= 0 and not flt(row.get("natal_amount")):
 				warnings.append({"code": "STF-010", "employee": row.employee,
 				                 "message": _("{0} has zero gross pay.").format(who)})
 			if flt(row.irt_amount) and not flt(row.taxable_income):
@@ -156,7 +188,10 @@ def _columns(submission_type):
 			("ss_employee_amount", _("Segurança Social (3%)")),
 			("taxable_income", _("Matéria Colectável")),
 			("irt_rate", _("Taxa IRT (%)")), ("irt_parcela_fixa", _("Parcela Fixa")),
-			("irt_amount", _("IRT Retido")), ("net_pay", _("Líquido")),
+			("irt_amount", _("IRT Retido")),
+			# the Christmas bonus run of the period, taxed on its own (HR, Nov 2026)
+			("natal_amount", _("Subsídio de Natal")), ("natal_irt", _("IRT Subsídio de Natal")),
+			("net_pay", _("Líquido")),
 		]
 	return [
 		("employee", _("Nº Colaborador")), ("employee_name", _("Nome")),
@@ -185,15 +220,15 @@ def build(submission_type, company, period_start=None, period_end=None, ignore_w
 
 	period_start = getdate(report["period_start"])
 	period_end = getdate(report["period_end"])
-	rows = _slips(company, period_start, period_end)
+	rows = _slips(company, period_start, period_end, submission_type)
 	columns = _columns(submission_type)
 
-	total_employee = sum(flt(r.irt_amount if submission_type == IRT
-	                         else r.ss_employee_amount) for r in rows)
+	total_employee = sum(flt(r.irt_amount) + flt(r.natal_irt) if submission_type == IRT
+	                     else flt(r.ss_employee_amount) for r in rows)
 	total_employer = sum(flt(r.ss_employer_amount) for r in rows) \
 		if submission_type == INSS else 0.0
-	total_base = sum(flt(r.taxable_income if submission_type == IRT else r.ss_base)
-	                 for r in rows)
+	total_base = sum(flt(r.taxable_income) + flt(r.natal_amount) if submission_type == IRT
+	                 else flt(r.ss_base) for r in rows)
 
 	doc = frappe.get_doc({
 		"doctype": "Isoft Statutory Submission",
@@ -203,7 +238,7 @@ def build(submission_type, company, period_start=None, period_end=None, ignore_w
 		"period_end": period_end,
 		"status": "Generated",
 		"employees": len(rows),
-		"total_gross": sum(flt(r.gross_pay) for r in rows),
+		"total_gross": sum(flt(r.gross_pay) + flt(r.get("natal_amount")) for r in rows),
 		"total_base": total_base,
 		"total_employee": total_employee,
 		"total_employer": total_employer,

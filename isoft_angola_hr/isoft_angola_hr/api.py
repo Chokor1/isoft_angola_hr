@@ -1319,7 +1319,8 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		# Already processed? A non-cancelled salary slip whose period overlaps this one.
 		ex = frappe.db.sql(
 			"""select name, docstatus, journal_entry, payment_entry from `tabIsoft Salary Slip`
-			where employee=%s and docstatus<2 and start_date<=%s and end_date>=%s limit 1""",
+			where employee=%s and docstatus<2 and start_date<=%s and end_date>=%s
+			  and ifnull(run_type, 'Salary')='Salary' limit 1""",
 			(e.name, end, start), as_dict=True,
 		)
 		already = bool(ex)

@@ -24,7 +24,7 @@ def execute(filters=None):
 	conditions, values = ru.slip_conditions(filters)
 
 	rows = frappe.db.sql(
-		"""select s.name, s.employee, s.employee_name, e.department, s.start_date, s.end_date,
+		"""select s.name, ifnull(s.run_type, 'Salary') as run_type, s.employee, s.employee_name, e.department, s.start_date, s.end_date,
 			s.gross_pay, s.total_deduction, s.net_pay, s.irt_amount, s.ss_employee_amount,
 			s.ss_employer_amount, s.employer_cost, s.docstatus, s.journal_entry, s.payment_entry,
 			s.payroll_entry,
@@ -42,6 +42,7 @@ def execute(filters=None):
 		basic = flt(r.basic)
 		gross = flt(r.gross_pay)
 		data.append({
+			"run_type": _(r.run_type),
 			"salary_slip": r.name,
 			"employee": r.employee,
 			"employee_name": r.employee_name,
@@ -78,6 +79,7 @@ def _columns():
 	return [
 		ru.column(_("Salary Slip"), "salary_slip", "Link", 190, "Isoft Salary Slip"),
 		ru.column(_("Employee"), "employee", "Link", 110, "Employee"),
+		ru.column(_("Run Type"), "run_type", "Data", 120),
 		ru.column(_("Employee Name"), "employee_name", "Data", 180),
 		ru.column(_("Department"), "department", "Link", 140, "Department"),
 		ru.column(_("From"), "start_date", "Date", 95),

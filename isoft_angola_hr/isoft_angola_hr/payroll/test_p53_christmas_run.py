@@ -439,3 +439,67 @@ class TestSettlementAfterBonus(BonusFixture):
 	def test_the_settlement_document_reads_the_bonus_paid(self):
 		self.bonus_slip(submit=True)
 		self.assertEqual(christmas.paid_in_year(self.emp.name, YEAR), 200000.0)
+
+
+class TestReportsAndFilings(BonusFixture):
+	"""December: one IRT row per employee with the bonus in its own columns; the INSS file
+	and report leave the bonus out; the reports can be filtered by run type."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		frappe.db.set_value("Employee", cls.emp.name, {"custom_nif": "5417000002",
+		                                               "custom_inss_number": "0123456781"})
+
+	def both(self):
+		salary = self.salary_slip(submit=True)
+		bonus = self.bonus_slip(submit=True)
+		return salary, bonus
+
+	def build(self, kind):
+		from isoft_angola_hr.isoft_angola_hr.services import statutory_filing as sf
+		res = sf.build(kind, self.company, self.bstart, self.bend)
+		return res, [r for r in res["rows"] if r.employee == self.emp.name]
+
+	def test_the_irt_file_has_one_row_with_the_bonus_columns(self):
+		from isoft_angola_hr.isoft_angola_hr.services import statutory_filing as sf
+		salary, bonus = self.both()
+		res, rows = self.build(sf.IRT)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual((rows[0].natal_amount, rows[0].natal_irt), (200000.0, 20500.0))
+		self.assertEqual(rows[0].irt_amount, salary.irt_amount)
+		self.assertIn("natal_irt", [c[0] for c in res["columns"]])
+		self.assertAlmostEqual(res["totals"]["employee"],
+		                       sum(frappe.utils.flt(r.irt_amount) + frappe.utils.flt(r.natal_irt)
+		                           for r in res["rows"]), places=2)
+
+	def test_the_inss_file_leaves_the_bonus_out(self):
+		from isoft_angola_hr.isoft_angola_hr.services import statutory_filing as sf
+		salary, bonus = self.both()
+		res, rows = self.build(sf.INSS)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0].ss_employee_amount, salary.ss_employee_amount)
+
+	def test_an_employee_paid_only_the_bonus_still_has_an_irt_row(self):
+		from isoft_angola_hr.isoft_angola_hr.services import statutory_filing as sf
+		self.bonus_slip(submit=True)
+		res, rows = self.build(sf.IRT)
+		self.assertEqual(len(rows), 1)
+		self.assertEqual((rows[0].gross_pay, rows[0].natal_irt), (0, 20500.0))
+
+	def test_the_register_filters_by_run_type(self):
+		from isoft_angola_hr.isoft_angola_hr.report.payroll_register import payroll_register
+		self.both()
+		filters = frappe._dict(company=self.company, from_date=self.bstart, to_date=self.bend,
+		                       employee=self.emp.name, run_type=christmas.RUN_CHRISTMAS)
+		_cols, data = payroll_register.execute(filters)[:2]
+		rows = [d for d in data if d.get("employee") == self.emp.name]
+		self.assertEqual([r.get("run_type") for r in rows], [christmas.RUN_CHRISTMAS])
+
+	def test_the_inss_report_leaves_the_bonus_out(self):
+		from isoft_angola_hr.isoft_angola_hr.report.inss_contribution_report import inss_contribution_report
+		self.both()
+		filters = frappe._dict(company=self.company, from_date=self.bstart, to_date=self.bend,
+		                       employee=self.emp.name)
+		data = inss_contribution_report.execute(filters)[1]
+		self.assertEqual(len([d for d in data if d.get("employee") == self.emp.name]), 1)

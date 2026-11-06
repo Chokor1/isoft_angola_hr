@@ -24,7 +24,7 @@ def execute(filters=None):
 	conditions, values = ru.slip_conditions(filters)
 
 	rows = frappe.db.sql(
-		"""select s.name, s.employee, s.employee_name, e.custom_iban as iban, e.bank_name,
+		"""select s.name, ifnull(s.run_type, 'Salary') as run_type, s.employee, s.employee_name, e.custom_iban as iban, e.bank_name,
 			s.net_pay, s.docstatus, s.journal_entry, s.payment_entry, s.end_date, s.payroll_entry
 		from `tabIsoft Salary Slip` s
 		left join `tabEmployee` e on e.name = s.employee
@@ -39,6 +39,7 @@ def execute(filters=None):
 	for r in rows:
 		iban = (r.iban or "").strip()
 		data.append({
+			"run_type": _(r.run_type),
 			"employee": r.employee,
 			"employee_name": r.employee_name,
 			"bank_name": r.bank_name,
@@ -60,6 +61,7 @@ def execute(filters=None):
 def _columns():
 	return [
 		ru.column(_("Employee"), "employee", "Link", 110, "Employee"),
+		ru.column(_("Run Type"), "run_type", "Data", 120),
 		ru.column(_("Employee Name"), "employee_name", "Data", 190),
 		ru.column(_("Bank"), "bank_name", "Data", 140),
 		ru.column(_("IBAN"), "iban", "Data", 220),

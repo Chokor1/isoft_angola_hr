@@ -160,10 +160,11 @@ def configuration_status(company, on_date=None):
 		    _("Enabled — {0}% of base").format(flt(s.get("natal_rate")))
 		    if natal_on else _("SWITCHED OFF"),
 		    natal_on,
-		    _("This payroll period ends in the configured Natal payment month, but the "
-		      "component is switched off in Settings → Enabled Components, so no 13th "
-		      "month will be proposed for anybody. Artigo 238.º n.º 1 al. b) makes it an "
-		      "entitlement of at least 50% of the salário-base."),
+		    _("This payroll period ends in the configured Natal payment month. The Christmas "
+		      "bonus is paid by its own run (Payroll → Run Type: Christmas Bonus), which "
+		      "cannot be created while the component is switched off in Settings → Enabled "
+		      "Components. Artigo 238.º n.º 1 al. b) makes it an entitlement of at least 50% "
+		      "of the salário-base."),
 		    severity=WARNING)
 
 	# --- suspension: a gap in the data model, stated rather than hidden -------- #
@@ -279,20 +280,25 @@ def _previous_period_slips(company, start, end):
 	every single employee is reported as "first payroll" — 80 warnings that mean nothing
 	and train people to ignore the panel.
 	"""
+	# Salary slips only, here and below: the Christmas bonus run shares December's period
+	# and is not a month's pay to compare against.
 	prev_end = frappe.db.sql(
 		"""select max(end_date) from `tabIsoft Salary Slip`
-		where docstatus < 2 and company=%s and end_date < %s""",
+		where docstatus < 2 and company=%s and end_date < %s
+		  and ifnull(run_type, 'Salary')='Salary'""",
 		(company, getdate(start)))
 	prev_end = prev_end[0][0] if prev_end and prev_end[0][0] else None
 	if not prev_end:
 		return {}, (None, None)
 	prev_start = frappe.db.sql(
 		"""select min(start_date) from `tabIsoft Salary Slip`
-		where docstatus < 2 and company=%s and end_date = %s""", (company, prev_end))[0][0]
+		where docstatus < 2 and company=%s and end_date = %s
+		  and ifnull(run_type, 'Salary')='Salary'""", (company, prev_end))[0][0]
 	rows = frappe.db.sql(
 		"""select employee, gross_pay, net_pay, irt_amount, ss_employee_amount
 		from `tabIsoft Salary Slip`
-		where docstatus < 2 and company=%s and end_date = %s""",
+		where docstatus < 2 and company=%s and end_date = %s
+		  and ifnull(run_type, 'Salary')='Salary'""",
 		(company, prev_end), as_dict=True)
 	return {r.employee: r for r in rows}, (getdate(prev_start), getdate(prev_end))
 
@@ -302,7 +308,8 @@ def _existing_slips(company, start, end):
 	whole company instead of one per employee."""
 	rows = frappe.db.sql(
 		"""select employee, name, docstatus from `tabIsoft Salary Slip`
-		where company=%s and docstatus<2 and start_date<=%s and end_date>=%s""",
+		where company=%s and docstatus<2 and start_date<=%s and end_date>=%s
+		  and ifnull(run_type, 'Salary')='Salary'""",
 		(company, getdate(end), getdate(start)), as_dict=True)
 	out = {}
 	for r in rows:

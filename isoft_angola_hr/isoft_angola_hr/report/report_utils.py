@@ -61,6 +61,10 @@ def slip_conditions(filters, alias="s"):
 	if filters.get("payroll_entry"):
 		conds.append("{0}.payroll_entry = %s".format(alias))
 		values.append(filters["payroll_entry"])
+	if filters.get("run_type"):
+		# "Salary" or "Christmas Bonus" (the bonus run shares December's period)
+		conds.append("ifnull({0}.run_type, 'Salary') = %s".format(alias))
+		values.append(filters["run_type"])
 	if filters.get("department"):
 		conds.append("e.department = %s")
 		values.append(filters["department"])
@@ -85,6 +89,8 @@ PERIOD_FILTERS = [
 	 "options": "Isoft Payroll Entry"},
 	{"fieldname": "docstatus", "label": "Payroll Status", "fieldtype": "Select",
 	 "options": "Submitted\nDraft\nAll", "default": "Submitted"},
+	{"fieldname": "run_type", "label": "Run Type", "fieldtype": "Select",
+	 "options": "\nSalary\nChristmas Bonus"},
 ]
 
 

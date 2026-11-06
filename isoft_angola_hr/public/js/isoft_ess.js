@@ -260,6 +260,14 @@
 	}
 
 	/* ================================================================ PAYSLIPS */
+	// A Christmas bonus slip shares December's period; it is titled by its year instead.
+	function slipTitle(r) {
+		if (r.run_type === "Christmas Bonus") {
+			return __("Christmas Bonus") + " " + String(r.end_date || "").slice(0, 4);
+		}
+		return SS.period(r.start_date, r.end_date);
+	}
+
 	function payslips(app, arg) {
 		if (arg) return payslipDetail(app, arg);
 		return SS.api("my_payslips", { limit: 36 }).then(function (rows) {
@@ -272,7 +280,7 @@
 			var list = '<ul class="ss-list">' + rows.map(function (r) {
 				return '<li class="tap" tabindex="0" role="button" data-slip="' + esc(r.name) +
 					'"><div class="ss-li-top"><div><div class="ss-li-title">' +
-					esc(SS.period(r.start_date, r.end_date)) + "</div>" +
+					esc(slipTitle(r)) + "</div>" +
 					'<div class="ss-li-sub">' + esc(__("Gross")) + " " +
 					money(r.gross_pay, { bare: true }) + " · " + esc(__("Deductions")) + " " +
 					money(r.total_deduction, { bare: true }) + "</div></div>" +
@@ -287,7 +295,7 @@
 				esc(__("Social Security")) + '</th><th class="num">' + esc(__("IRT")) +
 				'</th><th class="num">' + esc(__("Net")) + "</th><th></th></tr></thead><tbody>" +
 				rows.map(function (r) {
-					return '<tr><td>' + esc(SS.period(r.start_date, r.end_date)) + "</td><td>" +
+					return '<tr><td>' + esc(slipTitle(r)) + "</td><td>" +
 						date(r.posting_date) + '</td><td class="num">' +
 						money(r.gross_pay, { bare: true }) + '</td><td class="num">' +
 						money(r.ss_employee_amount, { bare: true }) + '</td><td class="num">' +

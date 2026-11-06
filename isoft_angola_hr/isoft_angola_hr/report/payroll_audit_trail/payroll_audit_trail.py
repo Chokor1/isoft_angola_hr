@@ -41,7 +41,7 @@ def execute(filters=None):
 		values.extend(scope_values)
 
 	entries = frappe.db.sql(
-		"""select pe.name, pe.company, pe.start_date, pe.end_date, ifnull(pe.status,'Draft') as status,
+		"""select pe.name, ifnull(pe.run_type, 'Salary') as run_type, pe.company, pe.start_date, pe.end_date, ifnull(pe.status,'Draft') as status,
 			pe.number_of_employees, pe.prepared_by, pe.submitted_by, pe.approved_by, pe.posted_by,
 			pe.payment_authorized_by, pe.approved_at, pe.posted_at, pe.paid_at, pe.rejected_by,
 			pe.rejection_reason, pe.exported_by, pe.export_count, pe.approval_fingerprint
@@ -56,6 +56,7 @@ def execute(filters=None):
 		t = totals.get(e.name, {})
 		data.append({
 			"payroll_entry": e.name,
+			"run_type": _(e.run_type),
 			"company": e.company,
 			"start_date": e.start_date,
 			"end_date": e.end_date,
@@ -107,6 +108,7 @@ def _totals_by_entry(names):
 def _columns():
 	return [
 		ru.column(_("Payroll Entry"), "payroll_entry", "Link", 120, "Isoft Payroll Entry"),
+		ru.column(_("Run Type"), "run_type", "Data", 120),
 		ru.column(_("Company"), "company", "Link", 150, "Company"),
 		ru.column(_("From"), "start_date", "Date", 95),
 		ru.column(_("To"), "end_date", "Date", 95),

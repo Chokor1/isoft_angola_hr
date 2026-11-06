@@ -3030,3 +3030,4 @@
 "Christmas Bonus - {0}/12","Subsídio de Natal - {0}/12","Recibo de Vencimento"
 "already paid","já pago"
 "{0} already paid by Christmas bonus slip {1}; {2} remains due.","{0} já pago pelo recibo de Subsídio de Natal {1}; falta pagar {2}."
+"This payroll period ends in the configured Natal payment month. The Christmas bonus is paid by its own run (Payroll → Run Type: Christmas Bonus), which cannot be created while the component is switched off in Settings → Enabled Components. Artigo 238.º n.º 1 al. b) makes it an entitlement of at least 50% of the salário-base.","Este período termina no mês de pagamento do Natal configurado. O Subsídio de Natal é pago por um processamento próprio (Processamento → Tipo: Subsídio de Natal), que não pode ser criado enquanto o componente estiver desactivado em Definições → Componentes Activos. O artigo 238.º n.º 1 al. b) torna-o um direito de pelo menos 50% do salário-base."

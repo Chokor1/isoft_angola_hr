@@ -117,11 +117,11 @@ def my_payslips(limit=24):
 	"""Submitted payslips only — never a draft."""
 	me = current_employee()
 	return frappe.db.sql(
-		"""select name, start_date, end_date, posting_date, gross_pay, total_deduction,
-			net_pay, irt_amount, ss_employee_amount
+		"""select name, ifnull(run_type, 'Salary') as run_type, start_date, end_date,
+			posting_date, gross_pay, total_deduction, net_pay, irt_amount, ss_employee_amount
 		from `tabIsoft Salary Slip`
 		where employee = %s and docstatus = 1
-		order by end_date desc limit %s""", (me, cint(limit)), as_dict=True)
+		order by end_date desc, run_type limit %s""", (me, cint(limit)), as_dict=True)
 
 
 def my_payslip(name):

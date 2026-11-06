@@ -28,7 +28,7 @@ def execute(filters=None):
 	conditions, values = ru.slip_conditions(filters)
 
 	rows = frappe.db.sql(
-		"""select s.name, s.employee, s.employee_name, e.department, e.custom_nif as nif,
+		"""select s.name, ifnull(s.run_type, 'Salary') as run_type, s.employee, s.employee_name, e.department, e.custom_nif as nif,
 			s.start_date, s.end_date, s.gross_pay, s.ss_employee_amount, s.taxable_income,
 			s.irt_amount, s.net_pay, s.irt_table, s.irt_bracket_from, s.irt_bracket_to,
 			s.irt_rate, s.irt_parcela_fixa
@@ -42,6 +42,7 @@ def execute(filters=None):
 	data = []
 	for r in rows:
 		data.append({
+			"run_type": _(r.run_type),
 			"employee": r.employee,
 			"employee_name": r.employee_name,
 			"nif": r.nif,
@@ -79,6 +80,7 @@ def _bracket_label(row):
 def _columns():
 	return [
 		ru.column(_("Employee"), "employee", "Link", 110, "Employee"),
+		ru.column(_("Run Type"), "run_type", "Data", 120),
 		ru.column(_("Employee Name"), "employee_name", "Data", 180),
 		ru.column(_("NIF"), "nif", "Data", 110),
 		ru.column(_("Department"), "department", "Link", 140, "Department"),

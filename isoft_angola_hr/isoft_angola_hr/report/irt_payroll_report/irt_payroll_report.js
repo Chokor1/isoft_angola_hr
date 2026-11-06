@@ -19,6 +19,10 @@ frappe.query_reports["IRT Payroll Report"] = {
 		{ fieldname: "employee", label: __("Employee"), fieldtype: "Link", options: "Employee" },
 		{ fieldname: "department", label: __("Department"), fieldtype: "Link", options: "Department" },
 		{
+			fieldname: "run_type", label: __("Run Type"), fieldtype: "Select",
+			options: ["", "Salary", "Christmas Bonus"],
+		},
+		{
 			fieldname: "payroll_entry", label: __("Payroll Entry"), fieldtype: "Link",
 			options: "Isoft Payroll Entry",
 		},

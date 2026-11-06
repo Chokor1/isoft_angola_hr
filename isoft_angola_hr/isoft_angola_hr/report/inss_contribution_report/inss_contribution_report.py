@@ -24,6 +24,8 @@ _TOTAL_FIELDS = ("ss_base", "ss_employee_amount", "ss_employer_amount", "total_c
 def execute(filters=None):
 	ru.guard(perms.REPORT_STATUTORY, filters)
 	conditions, values = ru.slip_conditions(filters)
+	# The Christmas bonus carries no INSS (HR, November 2026): salary slips only.
+	conditions += " and ifnull(s.run_type, 'Salary') = 'Salary'"
 
 	rows = frappe.db.sql(
 		"""select s.name, s.employee, s.employee_name, e.department,
