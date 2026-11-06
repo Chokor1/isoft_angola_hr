@@ -136,3 +136,86 @@ def exclusion_reason(employee, year):
 	if settled:
 		return _("the Christmas bonus was paid by final settlement {0}").format(settled[0])
 	return None
+
+
+def _profile(employee, end, company):
+	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import (
+		get_active_profile,
+	)
+	return get_active_profile(employee.name, end, company=company, employee_name=employee.employee_name)
+
+
+def preview_rows(company, year, department=None, branch=None, designation=None, inputs=None):
+	"""The bonus run's preview: one row per eligible employee — base, M, the bonus, IRT,
+	net — with HR's per-employee overrides ({employee: {"christmas", "reason"}}) applied."""
+	from frappe import _
+
+	year = int(year)
+	start, end = bonus_period(year)
+	settings = engine.get_settings()
+	rate = flt(settings.natal_rate)
+	posting = getdate("{0}-12-15".format(year))
+	filters = {"company": company, "status": ("in", ("Active", "Suspended"))}
+	for field, value in (("department", department), ("branch", branch), ("designation", designation)):
+		if value:
+			filters[field] = value
+	inputs = inputs or {}
+	out = []
+	for e in frappe.get_all("Employee", filters=filters, order_by="employee_name",
+	                        fields=["name", "employee_name", "department", "designation",
+	                                "date_of_joining", "status"], limit_page_length=2000):
+		row = {"employee": e.name, "employee_name": e.employee_name, "department": e.department,
+		       "designation": e.designation, "suspended": 1 if e.status == "Suspended" else 0,
+		       "blocked": 0, "exception": None}
+		reason = exclusion_reason(e, year)
+		if reason:
+			continue
+		try:
+			prof = _profile(e, end, company)
+		except frappe.ValidationError as exc:
+			row.update(blocked=1, exception=frappe.utils.strip_html(str(exc)))
+			out.append(row)
+			continue
+		if not prof:
+			row.update(blocked=1, exception=_("No Salary Profile is effective on {0}.").format(end))
+			out.append(row)
+			continue
+		months = bonus_months(e.date_of_joining, year)
+		default = compute_bonus(prof.base, rate, months, posting)["natal_amount"]
+		inp = inputs.get(e.name) or {}
+		override_reason = (inp.get("reason") or "").strip() or None
+		amount = flt(inp["christmas"], 2) if inp.get("christmas") not in (None, "") else default
+		res = compute_bonus(prof.base, rate, months, posting,
+		                    override=amount if amount != default else None)
+		existing = frappe.db.get_value("Isoft Salary Slip", {
+			"employee": e.name, "run_type": RUN_CHRISTMAS, "docstatus": ("<", 2),
+			"start_date": start, "end_date": end}, "name")
+		row.update({
+			"base": flt(prof.base, 2), "months": months, "christmas_default": default,
+			"christmas_max": full_year_amount(prof.base, rate),
+			"christmas": res["natal_amount"], "irt": res["irt_amount"], "net": res["net_pay"],
+			"override_reason": override_reason, "already": 1 if existing else 0,
+			"existing_slip": existing,
+		})
+		out.append(row)
+	return out
+
+
+def check_override(row, default, ceiling=None):
+	"""HR may change one employee's bonus, never silently: a different amount needs a
+	reason, and it may not exceed a full year's bonus (the salary slip enforces the same
+	ceiling; checking it here refuses the whole run before anything is created)."""
+	from frappe import _
+
+	amount = flt(row.get("christmas"), 2)
+	if ceiling is not None and (amount < 0 or amount > flt(ceiling, 2)):
+		frappe.throw(_("The Christmas bonus for {0} cannot exceed a full year's bonus ({1}).").format(
+			frappe.bold(row.get("employee_name") or row.get("employee")),
+			frappe.utils.fmt_money(ceiling, 2)), title=_("Christmas Bonus Too High"))
+	if amount != flt(default, 2) and not (row.get("override_reason") or "").strip():
+		frappe.throw(_("The Christmas bonus of {0} was changed from {1} to {2}. Enter the reason "
+		               "for the change.").format(
+			frappe.bold(row.get("employee_name") or row.get("employee")),
+			frappe.utils.fmt_money(default, 2), frappe.utils.fmt_money(amount, 2)),
+			title=_("Reason Required"))
+	return amount != flt(default, 2)

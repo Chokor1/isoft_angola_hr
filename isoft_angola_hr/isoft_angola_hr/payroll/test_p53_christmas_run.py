@@ -9,6 +9,7 @@ only through the protected runner (payroll/testing_guard.py).
 import unittest
 
 import frappe
+from frappe.utils import getdate
 
 from isoft_angola_hr.isoft_angola_hr import install
 from isoft_angola_hr.isoft_angola_hr.payroll.testing_guard import (  # noqa: F401
@@ -270,3 +271,64 @@ class TestBonusRun(BonusRunFixture):
 		amended = self.bonus_slip(run=slip.payroll_entry, submit=True, amended_from=slip.name)
 		self.assertEqual(amended.docstatus, 1)
 		self.assertEqual(amended.net_pay, 179500.0)
+
+
+class TestConsole(BonusRunFixture):
+	def preview(self, inputs=None):
+		rows = api.payroll_preview(self.company, None, None, department=self.dept,
+		                           run_type=christmas.RUN_CHRISTMAS, year=YEAR,
+		                           inputs=frappe.as_json(inputs or {}))
+		return {r["employee"]: r for r in rows}
+
+	def test_preview_shows_the_bonus(self):
+		row = self.preview()[self.emp.name]
+		self.assertEqual((row["base"], row["months"], row["christmas"], row["irt"], row["net"]),
+		                 (400000.0, 12, 200000.0, 20500.0, 179500.0))
+		self.assertFalse(row["suspended"])
+
+	def test_preview_applies_an_override(self):
+		row = self.preview({self.emp.name: {"christmas": 150000, "reason": "Suspended 2 months"}})[self.emp.name]
+		self.assertEqual(row["christmas"], 150000.0)
+		self.assertEqual(row["net"], 150000.0 - row["irt"])
+
+	def create(self, christmas_amount=None, reason=None):
+		row = dict(self.preview()[self.emp.name])
+		if christmas_amount is not None:
+			row["christmas"] = christmas_amount
+			row["override_reason"] = reason
+		res = api.create_payroll_from_preview(
+			self.company, None, None, frappe.as_json([row]), posting_date="{0}-12-15".format(YEAR),
+			run_type=christmas.RUN_CHRISTMAS, year=YEAR)
+		self.addCleanup(frappe.db.sql, "delete from `tabIsoft Payroll Employee` where parent=%s", res["name"])
+		self.addCleanup(frappe.db.sql, "delete from `tabIsoft Payroll Entry` where name=%s", res["name"])
+		return res
+
+	def test_create_makes_a_bonus_run(self):
+		res = self.create()
+		entry = frappe.get_doc("Isoft Payroll Entry", res["name"])
+		self.assertEqual(entry.run_type, christmas.RUN_CHRISTMAS)
+		self.assertEqual((getdate(entry.start_date), getdate(entry.end_date)),
+		                 tuple(getdate(d) for d in christmas.bonus_period(YEAR)))
+		self.assertEqual(entry.total_net_pay, 179500.0)
+
+	def test_override_needs_a_reason(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.create(150000, reason="  ")
+
+	def test_override_cannot_exceed_a_full_year(self):
+		with self.assertRaises(frappe.ValidationError):
+			self.create(200000.01, reason="typo")
+
+	def test_override_is_kept_and_shown_to_the_approver(self):
+		res = self.create(150000, reason="Suspended two months")
+		entry = frappe.get_doc("Isoft Payroll Entry", res["name"])
+		slip = frappe.get_doc("Isoft Salary Slip", entry.employees[0].salary_slip)
+		self.assertEqual((slip.subsidio_natal, slip.natal_override_reason), (150000.0, "Suspended two months"))
+		overrides = entry.approval_summary()["christmas_overrides"]
+		self.assertEqual([(o["employee"], o["amount"]) for o in overrides], [(self.emp.name, 150000.0)])
+
+	def test_salary_preview_no_longer_defaults_the_bonus(self):
+		start, end = self.bstart, self.bend
+		rows = api.payroll_preview(self.company, start, end, department=self.dept)
+		row = [r for r in rows if r["employee"] == self.emp.name][0]
+		self.assertEqual((row["christmas"], row["natal_default"]), (0.0, 0.0))

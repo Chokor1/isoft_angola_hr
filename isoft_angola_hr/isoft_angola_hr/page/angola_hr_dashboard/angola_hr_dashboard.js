@@ -3425,14 +3425,20 @@ class AngolaHR {
 					subtitle: __("Choose the period and scope, check readiness, then prepare the run. Preparing creates draft slips — nothing is paid until the run is approved and posted.") },
 				`<div class="ahr-form-grid">
 					<div class="ahr-field"><label>${__("Company")}</label><select class="pe-company"><option value="">--</option>${opts}</select></div>
-					<div class="ahr-field"><label>${__("Month")}</label><input type="month" class="pe-month"></div>
-					<div class="ahr-field"><label>${__("Period")}</label><input type="text" class="pe-period" readonly tabindex="-1"></div>
+					<div class="ahr-field"><label>${__("Run Type")}</label><select class="pe-runtype">
+						<option value="Salary">${__("Salary")}</option>
+						<option value="Christmas Bonus">${__("Christmas Bonus")}</option></select></div>
+					<div class="ahr-field pe-salary-only"><label>${__("Month")}</label><input type="month" class="pe-month"></div>
+					<div class="ahr-field pe-salary-only"><label>${__("Period")}</label><input type="text" class="pe-period" readonly tabindex="-1"></div>
+					<div class="ahr-field pe-bonus-only" style="display:none;"><label>${__("Year")}</label><input type="number" class="pe-year" min="2000" max="2100"></div>
+					<div class="ahr-field pe-bonus-only" style="display:none;"><label>${__("Payment Date")}</label><input type="date" class="pe-paydate"></div>
 					<div class="ahr-field"><label>${__("Department")}</label><select class="pe-dept"><option value="">${__("All")}</option></select></div>
 					<div class="ahr-field"><label>${__("Branch")}</label><select class="pe-branch"><option value="">${__("All")}</option></select></div>
 					<div class="ahr-field"><label>${__("Designation")}</label><select class="pe-desig"><option value="">${__("All")}</option></select></div>
 				</div><br>
-				<label style="margin-right:16px;"><input type="checkbox" class="pe-valatt"> ${__("Validate Attendance")}</label>
-				<label style="margin-right:16px;"><input type="checkbox" class="pe-timesheet"> ${__("Based on Timesheet")}</label><br><br>
+				<span class="pe-salary-only"><label style="margin-right:16px;"><input type="checkbox" class="pe-valatt"> ${__("Validate Attendance")}</label>
+				<label style="margin-right:16px;"><input type="checkbox" class="pe-timesheet"> ${__("Based on Timesheet")}</label></span>
+				<div class="pe-bonus-only text-muted" style="display:none;">${__("Christmas bonus: 50% of the basic salary for a full year of service, proportional to the complete months worked otherwise. IRT only, no INSS. Paid separately from the December salary.")}</div><br>
 				<button class="btn btn-primary btn-sm pe-preview"><i class="fa fa-eye"></i> ${__("Preview")}</button>
 				<button class="btn btn-default btn-sm pe-readiness"><i class="fa fa-check-circle-o"></i> ${__("Payroll Readiness")}</button>
 				<button class="btn btn-default btn-sm pe-prodready"><i class="fa fa-server"></i> ${__("Production Readiness")}</button>`
@@ -3515,6 +3521,19 @@ class AngolaHR {
 		this.$content.find(".pe-month").val(frappe.datetime.get_today().slice(0, 7));
 		syncPeriod();
 		this.$content.find(".pe-month").on("change", () => syncPeriod());
+		// Christmas bonus run: a year and a payment date instead of a month.
+		const year = new Date().getFullYear();
+		this.$content.find(".pe-year").val(year);
+		this.$content.find(".pe-paydate").val(`${year}-12-15`);
+		this.$content.find(".pe-year").on("change", (e) => {
+			this.$content.find(".pe-paydate").val(`${cint($(e.currentTarget).val())}-12-15`);
+		});
+		this.$content.find(".pe-runtype").on("change", (e) => {
+			const bonus = $(e.currentTarget).val() === "Christmas Bonus";
+			this.$content.find(".pe-salary-only").toggle(!bonus);
+			this.$content.find(".pe-bonus-only").toggle(bonus);
+			this.$content.find(".ahr-preview-wrap").empty();
+		});
 
 		this._refreshHistory = list;
 		this.$content.find(".pe-company").val(this.state.company || "");
@@ -4483,6 +4502,9 @@ class AngolaHR {
 		const p = this._pePeriod || {};
 		return {
 			company: this.$content.find(".pe-company").val(),
+			run_type: this.$content.find(".pe-runtype").val() || "Salary",
+			year: cint(this.$content.find(".pe-year").val()),
+			posting_date: this.$content.find(".pe-paydate").val(),
 			start_date: p.start,
 			end_date: p.end,
 			department: this.$content.find(".pe-dept").val(),
@@ -4496,6 +4518,7 @@ class AngolaHR {
 	runPreview(inputs) {
 		const f = this.peFilters();
 		if (!f.company) return frappe.msgprint(__("Select a company"));
+		if (f.run_type === "Christmas Bonus") return this.runBonusPreview(inputs);
 		if (!f.start_date || !f.end_date) return frappe.msgprint(__("Select a month"));
 		frappe.dom.freeze(__("Calculating preview..."));
 		this.call("payroll_preview", { ...f, inputs: JSON.stringify(inputs || {}) })
@@ -4656,6 +4679,93 @@ class AngolaHR {
 				company: f.company, start_date: f.start_date, end_date: f.end_date,
 				rows: JSON.stringify(rowsToCreate),
 				validate_attendance: f.validate_attendance, based_on_timesheet: f.based_on_timesheet,
+			})
+				.then((r) => {
+					frappe.dom.unfreeze();
+					frappe.show_alert({ message: __("Created {0} slips", [r.employees]), indicator: "green" });
+					this.openPayrollEntry(r.name);
+					if (this._refreshHistory) this._refreshHistory();
+				})
+				.catch(() => frappe.dom.unfreeze());
+		});
+	}
+
+	// ------------------------------------------------------------------ //
+	// Christmas bonus run (payroll/christmas.py): base, complete months, bonus, IRT, net.
+	runBonusPreview(inputs) {
+		const f = this.peFilters();
+		if (!f.year) return frappe.msgprint(__("Select the year"));
+		frappe.dom.freeze(__("Calculating preview..."));
+		this.call("payroll_preview", {
+			company: f.company, start_date: null, end_date: null, department: f.department,
+			branch: f.branch, designation: f.designation, run_type: f.run_type, year: f.year,
+			inputs: JSON.stringify(inputs || {}),
+		})
+			.then((rows) => { frappe.dom.unfreeze(); this.renderBonusPreview(rows); })
+			.catch(() => frappe.dom.unfreeze());
+	}
+
+	renderBonusPreview(rows) {
+		const $w = this.$content.find(".ahr-preview-wrap");
+		const esc = frappe.utils.escape_html;
+		if (!rows.length) {
+			$w.html(this.panel(__("Preview"), `<div class="ahr-empty">${__("No employees are due a Christmas bonus for the selected filters.")}</div>`));
+			return;
+		}
+		const open = rows.filter((r) => !r.already && !r.blocked);
+		const total = open.reduce((s, r) => s + flt(r.net), 0);
+		const body = rows.map((r) => {
+			const lock = r.already || r.blocked;
+			const changed = !r.blocked && flt(r.christmas) !== flt(r.christmas_default);
+			const name = `${esc(r.employee_name || r.employee)}${r.suspended ? ` <span class="indicator-pill orange">${__("Suspended")}</span>` : ""}`;
+			if (r.blocked) {
+				return `<tr data-emp="${esc(r.employee)}" class="pv-off"><td class="pv-c"><input type="checkbox" class="pv-include" disabled></td>
+					<td>${name}</td><td colspan="6" class="text-danger">${esc(r.exception || "")}</td></tr>`;
+			}
+			return `<tr data-emp="${esc(r.employee)}" data-default="${flt(r.christmas_default)}" class="${lock ? "pv-off" : ""}">
+				<td class="pv-c"><input type="checkbox" class="pv-include" ${lock ? "disabled" : "checked"}></td>
+				<td>${name}${r.already ? `<div class="text-muted small">${__("Already processed")}: ${esc(r.existing_slip || "")}</div>` : ""}</td>
+				<td class="text-right">${this.money(r.base)}</td>
+				<td class="text-right">${cint(r.months)}/12</td>
+				<td class="text-right"><input type="number" step="0.01" class="form-control input-xs pv-bonus" value="${flt(r.christmas)}" ${lock ? "disabled" : ""}></td>
+				<td><input type="text" class="form-control input-xs pv-reason" value="${esc(r.override_reason || "")}" placeholder="${changed ? __("Reason required") : ""}" ${lock ? "disabled" : ""}></td>
+				<td class="text-right">${this.money(r.irt)}</td>
+				<td class="text-right pv-net">${this.money(r.net)}</td></tr>`;
+		}).join("");
+		$w.html(this.panel(
+			__("Christmas Bonus Preview") + ` &middot; <span class="text-muted">${open.length} ${__("employees")} &middot; ${__("Total Net")}: ${this.money(total)}</span>`,
+			`<div class="pv-scroll"><table class="ahr-table pv-table"><thead><tr><th></th>
+				<th>${__("Employee")}</th><th class="text-right">${__("Basic Salary")}</th>
+				<th class="text-right">${__("Months")}</th><th class="text-right">${__("Christmas Bonus")}</th>
+				<th>${__("Reason for change")}</th><th class="text-right">IRT</th><th class="text-right">${__("Net")}</th></tr></thead>
+				<tbody>${body}</tbody></table></div>
+			<br><button class="btn btn-default btn-sm pv-recalc"><i class="fa fa-refresh"></i> ${__("Recalculate")}</button>
+			<button class="btn btn-primary btn-sm pv-create" style="margin-left:8px;"><i class="fa fa-cogs"></i> ${__("Create Christmas Bonus Slips")} (${open.length})</button>`
+		));
+		const collect = () => {
+			const inputs = {}, out = [];
+			$w.find(".pv-table tbody tr").each((_, tr) => {
+				const $tr = $(tr), emp = $tr.data("emp");
+				const $b = $tr.find(".pv-bonus");
+				if (!$b.length) return;
+				const amount = flt($b.val()), reason = ($tr.find(".pv-reason").val() || "").trim();
+				if (amount !== flt($tr.data("default"))) inputs[emp] = { christmas: amount, reason };
+				if (!$tr.find(".pv-include").is(":checked")) return;
+				const r = rows.find((x) => x.employee === emp);
+				out.push({ ...r, christmas: amount, override_reason: reason });
+			});
+			return { inputs, rows: out };
+		};
+		$w.find(".pv-recalc").on("click", () => this.runBonusPreview(collect().inputs));
+		$w.find(".pv-bonus").on("change", () => this.runBonusPreview(collect().inputs));
+		$w.find(".pv-create").on("click", () => {
+			const f = this.peFilters();
+			const c = collect();
+			if (!c.rows.length) return frappe.msgprint(__("Select at least one employee to process"));
+			frappe.dom.freeze(__("Creating salary slips..."));
+			this.call("create_payroll_from_preview", {
+				company: f.company, start_date: null, end_date: null, rows: JSON.stringify(c.rows),
+				posting_date: f.posting_date, run_type: f.run_type, year: f.year,
 			})
 				.then((r) => {
 					frappe.dom.unfreeze();

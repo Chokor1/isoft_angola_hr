@@ -187,6 +187,7 @@ class IsoftPayrollEntry(Document):
 				"adiantamento": flt(row.adiantamento),
 				"subsidio_ferias": flt(row.subsidio_ferias),
 				"subsidio_natal": flt(row.subsidio_natal),
+				"natal_override_reason": row.get("natal_override_reason"),
 				"validate_attendance": self.validate_attendance,
 				"based_on_timesheet": self.based_on_timesheet,
 			})
@@ -268,6 +269,17 @@ class IsoftPayrollEntry(Document):
 			"draft_slips": len([r for r in rows if cint(r["docstatus"]) == 0]),
 			"submitted_slips": len([r for r in rows if cint(r["docstatus"]) == 1]),
 			"negative_net": len([r for r in rows if flt(r["net_pay"]) < 0]),
+			"run_type": self.run_type or christmas.RUN_SALARY,
+			# a Christmas bonus HR changed by hand, with the reason, for the approver
+			"christmas_overrides": [
+				{"employee": r.employee, "employee_name": r.employee_name,
+				 "amount": flt(r.subsidio_natal), "reason": r.natal_override_reason}
+				for r in frappe.get_all("Isoft Salary Slip",
+				                        filters={"payroll_entry": self.name, "docstatus": ("<", 2),
+				                                 "natal_override_reason": ("is", "set")},
+				                        fields=["employee", "employee_name", "subsidio_natal",
+				                                "natal_override_reason"])
+			] if self.run_type == christmas.RUN_CHRISTMAS else [],
 			"approved": {
 				"employees": cint(self.approved_employees),
 				"gross": flt(self.approved_gross), "net": flt(self.approved_net),

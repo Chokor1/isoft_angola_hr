@@ -1194,10 +1194,21 @@ def _exception_row(employee, start, end, message):
 
 @frappe.whitelist()
 def payroll_preview(company, start_date, end_date, department=None, branch=None,
-                    designation=None, inputs=None, validate_attendance=0, based_on_timesheet=0):
+                    designation=None, inputs=None, validate_attendance=0, based_on_timesheet=0,
+                    run_type=None, year=None):
 	"""Dry-run a payroll batch: returns one computed row per eligible employee, honouring
-	any per-employee variable inputs (overtime / bonus / advance) passed back from the UI."""
+	any per-employee variable inputs (overtime / bonus / advance) passed back from the UI.
+
+	run_type "Christmas Bonus": the bonus run of ``year`` (payroll/christmas.py); the
+	dates are the bonus period and start_date / end_date are ignored."""
 	_guard(perms.PAYROLL_PREVIEW, company)
+	from isoft_angola_hr.isoft_angola_hr.payroll import christmas
+	if run_type == christmas.RUN_CHRISTMAS:
+		if not cint(year):
+			frappe.throw(_("Select the year of the Christmas bonus."), title=_("Invalid Request"))
+		return christmas.preview_rows(company, cint(year), department=department, branch=branch,
+		                              designation=designation,
+		                              inputs=_json_arg(inputs, "inputs", default={}) or {})
 	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import (
 		assert_single_profile_for_period,
 	)
@@ -1256,9 +1267,9 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 		# the save rejects is worse than one that proposes nothing.
 		ferias_full = (engine.ferias_full(prof.base, settings.ferias_rate)
 		               if engine.component_enabled(settings, "SFE") else 0.0)
-		natal_default = (engine.default_natal(prof.base, settings.natal_rate, e.date_of_joining,
-		                                      end, settings.get("natal_payment_month"))
-		                 if engine.component_enabled(settings, "SNA") else 0.0)
+		# No December Natal default: since November 2026 the Christmas bonus is paid by its
+		# own run (payroll/christmas.py), before the December salary.
+		natal_default = 0.0
 		# Overtime is HOURS. They default to the approved hours on submitted Attendance
 		# (attendance-based runs, component switched on) and HR can change them here; the
 		# amount is never typed — the engine prices them (services/overtime.py).
@@ -1342,11 +1353,59 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 	return out
 
 
+def _create_christmas_run(company, year, rows, posting_date=None):
+	"""The Christmas bonus run from its preview rows: the bonus period of ``year``, one slip
+	per employee, HR's changed amounts carried with their reason (payroll/christmas.py)."""
+	from isoft_angola_hr.isoft_angola_hr.payroll import christmas
+
+	if not year:
+		frappe.throw(_("Select the year of the Christmas bonus."), title=_("Invalid Request"))
+	if not rows:
+		frappe.throw(_("No employees to process."))
+	blocked = [r for r in rows if cint(r.get("blocked"))]
+	if blocked:
+		frappe.throw(_("{0} employee(s) still have unresolved payroll exceptions and cannot be "
+		               "processed:<br><br>{1}").format(len(blocked), "<br>".join(
+			"<b>{0}</b>: {1}".format(frappe.utils.escape_html(r.get("employee_name") or r.get("employee")),
+			                         frappe.utils.escape_html(r.get("exception") or _("unknown error")))
+			for r in blocked[:20])), title=_("Payroll Blocked"))
+	fresh = {r["employee"]: r for r in christmas.preview_rows(company, year)}
+	entry = frappe.new_doc("Isoft Payroll Entry")
+	entry.company = company
+	entry.run_type = christmas.RUN_CHRISTMAS
+	entry.start_date, entry.end_date = christmas.bonus_period(year)
+	entry.posting_date = getdate(posting_date) if posting_date else getdate("{0}-12-15".format(year))
+	for r in rows:
+		calc = fresh.get(r.get("employee"))
+		if not calc:
+			frappe.throw(_("{0} is not eligible for the {1} Christmas bonus.").format(
+				frappe.bold(r.get("employee_name") or r.get("employee")), year))
+		changed = christmas.check_override(r, calc["christmas_default"], calc["christmas_max"])
+		prof = christmas._profile(frappe._dict(name=r["employee"], employee_name=calc["employee_name"]),
+		                          entry.end_date, company)
+		entry.append("employees", {
+			"employee": r["employee"], "employee_name": calc["employee_name"],
+			"salary_profile": prof.name if prof else None,
+			"subsidio_natal": flt(r.get("christmas"), 2) if changed else 0,
+			"natal_override_reason": (r.get("override_reason") or "").strip() if changed else None,
+		})
+	entry.number_of_employees = len(entry.employees)
+	entry.insert()
+	entry.create_salary_slips()
+	return {"name": entry.name, "employees": entry.number_of_employees,
+	        "total_net_pay": flt(entry.total_net_pay)}
+
+
 @frappe.whitelist()
 def create_payroll_from_preview(company, start_date, end_date, rows, posting_date=None,
-                                validate_attendance=0, based_on_timesheet=0):
+                                validate_attendance=0, based_on_timesheet=0, run_type=None,
+                                year=None):
 	"""Create the Isoft Payroll Entry + Salary Slips from the previewed/edited rows."""
 	_guard(perms.PAYROLL_PREPARE, company)
+	from isoft_angola_hr.isoft_angola_hr.payroll import christmas
+	if run_type == christmas.RUN_CHRISTMAS:
+		return _create_christmas_run(company, cint(year), _json_arg(rows, "rows", default=[]),
+		                             posting_date)
 	from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import get_active_profile
 
 	rows = _json_arg(rows, "rows", default=[])

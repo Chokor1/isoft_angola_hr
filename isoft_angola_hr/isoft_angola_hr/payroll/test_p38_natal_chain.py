@@ -43,7 +43,7 @@ import frappe
 from frappe.utils import flt, getdate
 
 from isoft_angola_hr.isoft_angola_hr import api
-from isoft_angola_hr.isoft_angola_hr.payroll import engine, recibo
+from isoft_angola_hr.isoft_angola_hr.payroll import christmas, engine, recibo
 from isoft_angola_hr.isoft_angola_hr.payroll.test_p0_integration import (PREFIX,
                                                                         PayrollFixture)
 from isoft_angola_hr.isoft_angola_hr.services import angola_labour_law as law
@@ -138,14 +138,29 @@ class NatalFixture(PayrollFixture):
 		return engine.compute_slip(self.profile, values, settings=engine.get_settings(),
 		                           on_date=self.end, employee=self.employee.name)
 
-	def preview_row(self):
+	def preview_row(self, inputs=None):
 		rows = api.payroll_preview(company=self.company, start_date=str(self.start),
-		                           end_date=str(self.end))
+		                           end_date=str(self.end), inputs=frappe.as_json(inputs or {}))
 		rows = rows.get("rows") if isinstance(rows, dict) else rows
 		for r in rows:
 			if r.get("employee") == self.employee.name:
 				return r
 		return None
+
+	def bonus_row(self):
+		"""What the Christmas bonus run proposes for the fixture employee. Since November
+		2026 the bonus is its own run (payroll/christmas.py); the salary preview proposes
+		nothing. ``natal_default`` mirrors the key the salary preview used to carry."""
+		year = getdate(self.end).year
+		for r in christmas.preview_rows(self.company, year):
+			if r.get("employee") == self.employee.name:
+				return dict(r, natal_default=r.get("christmas_default"))
+		return None
+
+	def bonus_expected(self, base=None, joining="2020-01-01"):
+		base = flt(self.profile.base) if base is None else flt(base)
+		months = christmas.bonus_months(joining, getdate(self.end).year)
+		return flt(base * self.rate / 100.0 * months / 12.0, 2)
 
 
 # --------------------------------------------------------------------------- #
@@ -192,11 +207,14 @@ class TestThePreviewAgreesWithTheSave(NatalFixture):
 	def tearDown(self):
 		self.set_natal(True)
 
-	def test_with_the_component_on_the_preview_proposes_the_supplement(self):
+	def test_with_the_component_on_the_bonus_run_proposes_the_supplement(self):
+		"""Since November 2026 the proposal is the Christmas bonus run's; the salary
+		preview proposes nothing, so the bonus cannot be paid twice."""
 		self.set_natal(True)
-		row = self.preview_row()
+		self.assertEqual(flt(self.preview_row()["natal_default"]), 0.0)
+		row = self.bonus_row()
 		self.assertIsNotNone(row)
-		self.assertEqual(flt(row["natal_default"]), self.expected())
+		self.assertEqual(flt(row["natal_default"]), self.bonus_expected())
 		self.assertGreater(flt(row["natal_default"]), 0)
 
 	def test_with_the_component_off_the_preview_proposes_nothing(self):
@@ -291,9 +309,12 @@ class TestTheFullChain(NatalFixture):
 		cls.amount = None
 
 	def slip_with_natal(self, submit=False):
-		row = self.preview_row()
-		self.amount = flt(row["natal_default"])
-		return row, self.fresh_slip(submit=submit, subsidio_natal=row["natal_default"])
+		"""A Natal HR enters on a salary slip by hand — still allowed while no Christmas
+		bonus run has paid it — must survive preview → slip → payslip unchanged."""
+		self.amount = self.expected()
+		row = self.preview_row({self.employee.name: {"natal_amount": self.amount}})
+		row["natal_default"] = self.amount
+		return row, self.fresh_slip(submit=submit, subsidio_natal=self.amount)
 
 	def test_the_preview_amount_reaches_the_slip_unchanged(self):
 		row, slip = self.slip_with_natal()
@@ -461,8 +482,8 @@ class TestAdmissionMatrix(NatalFixture):
 				with self.subTest(case=name):
 					frappe.db.set_value("Employee", emp.name, "date_of_joining", joining)
 					frappe.clear_cache()
-					row = self.preview_row()
-					months = engine.natal_months(joining, self.end)
+					row = self.bonus_row()
+					months = christmas.bonus_months(joining, year)
 					self.assertEqual(
 						flt(row["natal_default"]),
 						flt(flt(self.profile.base) * self.rate / 100.0 * months / 12.0, 2))
@@ -568,8 +589,9 @@ class TestSalaryChangesDuringTheYear(NatalFixture):
 		return end.replace(day=1)
 
 	def _months(self):
-		return engine.natal_months(
-			frappe.db.get_value("Employee", self.employee.name, "date_of_joining"), self.end)
+		return christmas.bonus_months(
+			frappe.db.get_value("Employee", self.employee.name, "date_of_joining"),
+			getdate(self.end).year)
 
 	def test_an_increase_earlier_in_the_year_is_paid_on_the_current_base(self):
 		mid = self._mid_year()
@@ -577,7 +599,7 @@ class TestSalaryChangesDuringTheYear(NatalFixture):
 			self.skipTest("fixture runs in January; no earlier month to change in")
 		raised = flt(self.profile.base) + 100000
 		self._raise_to(raised, mid)
-		row = self.preview_row()
+		row = self.bonus_row()
 		self.assertEqual(flt(row["natal_default"]),
 		                 flt(raised * self.rate / 100.0 * self._months() / 12.0, 2),
 		                 "the 13th month was not paid on the salary in force when it fell due")
@@ -588,7 +610,7 @@ class TestSalaryChangesDuringTheYear(NatalFixture):
 			self.skipTest("fixture runs in January; no earlier month to change in")
 		lowered = flt(self.profile.base) - 50000
 		self._raise_to(lowered, mid)
-		row = self.preview_row()
+		row = self.bonus_row()
 		self.assertEqual(flt(row["natal_default"]),
 		                 flt(lowered * self.rate / 100.0 * self._months() / 12.0, 2))
 
@@ -599,7 +621,7 @@ class TestSalaryChangesDuringTheYear(NatalFixture):
 			self.skipTest("fixture runs in January")
 		raised = flt(self.profile.base) + 100000
 		self._raise_to(raised, mid)
-		row = self.preview_row()
+		row = self.bonus_row()
 		self.assertNotEqual(
 			flt(row["natal_default"]),
 			flt(flt(self.profile.base) * self.rate / 100.0 * self._months() / 12.0, 2))
@@ -612,7 +634,7 @@ class TestSalaryChangesDuringTheYear(NatalFixture):
 		raised = old_base + 100000
 		self._raise_to(raised, mid)
 		average = (old_base + raised) / 2.0
-		row = self.preview_row()
+		row = self.bonus_row()
 		self.assertNotEqual(
 			flt(row["natal_default"]),
 			flt(average * self.rate / 100.0 * self._months() / 12.0, 2))
