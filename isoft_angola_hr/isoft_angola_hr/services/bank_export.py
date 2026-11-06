@@ -356,7 +356,7 @@ def generate(entry_name, adapter=None):
 
 	from isoft_angola_hr.isoft_angola_hr.api import _salary_reference
 
-	reference = _salary_reference(entry.end_date)
+	reference = _salary_reference(entry.end_date, entry.run_type)
 	content, extension = exporter.generate(entry, rows, reference)
 	checksum = hashlib.sha256(content).hexdigest()
 

@@ -142,9 +142,12 @@ _MONTHS_PT = ["Janeiro", "Fevereiro", "Marco", "Abril", "Maio", "Junho",
               "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
 
 
-def _salary_reference(period_end):
-	"""Bank-transfer reference, e.g. 'Sal_Marco_2026' — from the payroll period's month/year."""
+def _salary_reference(period_end, run_type=None):
+	"""Bank-transfer reference, e.g. 'Sal_Marco_2026' — from the payroll period's month/year.
+	A Christmas bonus run reads 'Natal_2026'."""
 	d = getdate(period_end)
+	if run_type == "Christmas Bonus":
+		return "Natal_{0}".format(d.year)
 	return "Sal_{0}_{1}".format(_MONTHS_PT[d.month - 1], d.year)
 
 
@@ -1766,7 +1769,7 @@ def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
 	# ERPNext refuses to submit a Bank Entry without a reference, so one is always
 	# generated. When Finance has the bank's own reference they pass it here and it
 	# is used instead — the field never ends up empty either way (§18).
-	je.cheque_no = (bank_reference or "").strip() or _salary_reference(slip.end_date)
+	je.cheque_no = (bank_reference or "").strip() or _salary_reference(slip.end_date, slip.run_type)
 	je.cheque_date = je.posting_date
 	je.append("accounts", {
 		"account": payable_account, "cost_center": cost_center,

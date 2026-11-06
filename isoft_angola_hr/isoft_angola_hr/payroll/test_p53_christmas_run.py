@@ -186,6 +186,23 @@ class BonusRunFixture(BonusFixture, ControlFixture):
 		return cls._track(frappe.get_doc({"doctype": "Department", "department_name": name,
 		                                  "company": cls.company}).insert(ignore_permissions=True)).name
 
+	def posted_bonus_run(self):
+		"""A bonus run prepared by the officer, approved by the manager, posted by Finance."""
+		entry = self.entry()
+		frappe.set_user(self.users["officer"])
+		entry.fill_employees()
+		entry.create_salary_slips()
+		api.payroll_action(entry.name, wf.SUBMIT_FOR_APPROVAL)
+		frappe.set_user(self.users["manager"])
+		api.payroll_action(entry.name, wf.APPROVE)
+		frappe.set_user(self.users["finance"])
+		entry.reload()
+		entry.submit_salary_slips()
+		api.make_bulk_journal_entry(entry.name)
+		frappe.set_user("Administrator")
+		entry.reload()
+		return entry
+
 	def entry(self, group="A", employees=None):
 		doc = frappe.get_doc({
 			"doctype": "Isoft Payroll Entry", "company": self.company,
@@ -332,3 +349,18 @@ class TestConsole(BonusRunFixture):
 		rows = api.payroll_preview(self.company, start, end, department=self.dept)
 		row = [r for r in rows if r["employee"] == self.emp.name][0]
 		self.assertEqual((row["christmas"], row["natal_default"]), (0.0, 0.0))
+
+
+class TestPostingAndBank(BonusRunFixture):
+	def test_the_bonus_reference_is_natal_and_the_year(self):
+		self.assertEqual(api._salary_reference(self.bend, christmas.RUN_CHRISTMAS), "Natal_{0}".format(YEAR))
+		self.assertEqual(api._salary_reference(self.bend), "Sal_Dezembro_{0}".format(YEAR))
+
+	def test_the_bank_file_of_a_bonus_run_uses_it(self):
+		from isoft_angola_hr.isoft_angola_hr.services import bank_export
+		entry = self.posted_bonus_run()
+		frappe.set_user(self.users["finance"])
+		api.payroll_action(entry.name, wf.RELEASE_FOR_PAYMENT)
+		res = bank_export.generate(entry.name)
+		frappe.set_user("Administrator")
+		self.assertIn("Natal_{0}".format(YEAR), frappe.as_json(res))
