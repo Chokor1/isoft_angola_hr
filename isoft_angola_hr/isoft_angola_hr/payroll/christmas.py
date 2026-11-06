@@ -25,6 +25,7 @@ bank file and the receipt read a bonus slip exactly as they read a salary slip.
 
 from datetime import date
 
+import frappe
 from frappe.utils import flt, getdate
 
 from isoft_angola_hr.isoft_angola_hr.payroll import engine
@@ -101,3 +102,19 @@ def compute_bonus(base, rate, months, on_date, company=None, irt_table=None, ove
 		"food_exemption_applied": 0.0,
 		"transport_exemption_applied": 0.0,
 	}
+
+
+def bonus_slips_in_year(employee, year, exclude=None):
+	"""Names of the employee's submitted Christmas bonus slips for ``year``."""
+	return frappe.db.sql_list(
+		"""select name from `tabIsoft Salary Slip`
+		where employee=%s and docstatus=1 and run_type=%s and year(end_date)=%s and name!=%s
+		order by name""", (employee, RUN_CHRISTMAS, int(year), exclude or ""))
+
+
+def paid_in_year(employee, year):
+	"""The Christmas bonus already paid to the employee for ``year`` by bonus runs."""
+	return flt(frappe.db.sql(
+		"""select ifnull(sum(subsidio_natal), 0) from `tabIsoft Salary Slip`
+		where employee=%s and docstatus=1 and run_type=%s and year(end_date)=%s""",
+		(employee, RUN_CHRISTMAS, int(year)))[0][0], 2)

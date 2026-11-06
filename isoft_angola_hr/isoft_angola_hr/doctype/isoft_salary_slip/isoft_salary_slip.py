@@ -10,19 +10,40 @@ from frappe.utils import add_days, cint, date_diff, flt, getdate
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_profile.isoft_salary_profile import (
 	assert_single_profile_for_period,
 )
-from isoft_angola_hr.isoft_angola_hr.payroll import engine
+from isoft_angola_hr.isoft_angola_hr.payroll import christmas, engine
 from isoft_angola_hr.isoft_angola_hr.services import advances
 from isoft_angola_hr.isoft_angola_hr.services import overtime
 from isoft_angola_hr.isoft_angola_hr.services import payroll_workflow as wf
 
 
 class IsoftSalarySlip(Document):
+	def is_bonus(self):
+		return self.run_type == christmas.RUN_CHRISTMAS
+
+	def autoname(self):
+		"""Salary slips: ISS-{employee}-{start_date}. Christmas bonus slips share the December
+		salary slip's dates, so they are named by year: ISN-{employee}-{year} (-2, -3… after
+		a cancelled one that was not amended)."""
+		if not self.is_bonus():
+			self.name = "ISS-{0}-{1}".format(self.employee, getdate(self.start_date))
+			return
+		base = "ISN-{0}-{1}".format(self.employee, getdate(self.end_date).year)
+		name, n = base, 1
+		while frappe.db.exists(self.doctype, name):
+			n += 1
+			name = "{0}-{1}".format(base, n)
+		self.name = name
+
 	def validate(self):
+		self.run_type = self.run_type or christmas.RUN_SALARY
 		self.validate_belongs_to_run()
 		wf.assert_slip_not_locked(self)
 		self.validate_no_duplicate_payroll()
 		self.validate_enabled_components()
 		self.resolve_profile()
+		if self.is_bonus():
+			self.compute_bonus()
+			return
 		self.set_working_days()
 		self.compute()
 
@@ -53,7 +74,7 @@ class IsoftSalarySlip(Document):
 					frappe.PermissionError, title=_("Not Part of a Payroll Run"))
 
 		run = frappe.db.get_value("Isoft Payroll Entry", self.payroll_entry,
-		                          ["company", "start_date", "end_date"], as_dict=True)
+		                          ["company", "start_date", "end_date", "run_type"], as_dict=True)
 		if not run:
 			frappe.throw(_("Payroll {0} does not exist.").format(self.payroll_entry),
 			             frappe.PermissionError, title=_("Not Part of a Payroll Run"))
@@ -63,6 +84,11 @@ class IsoftSalarySlip(Document):
 				_("Salary slip {0} ({1}, {2} – {3}) does not match payroll {4} ({5}, {6} – {7}).").format(
 					self.name or _("new"), self.company, getdate(self.start_date), getdate(self.end_date),
 					frappe.bold(self.payroll_entry), run.company, getdate(run.start_date), getdate(run.end_date)),
+				frappe.PermissionError, title=_("Not Part of a Payroll Run"))
+		if (run.run_type or christmas.RUN_SALARY) != self.run_type:
+			frappe.throw(_("Salary slip {0} is a {1} slip but payroll {2} is a {3} run.").format(
+				self.name or _("new"), _(self.run_type), frappe.bold(self.payroll_entry),
+				_(run.run_type or christmas.RUN_SALARY)),
 				frappe.PermissionError, title=_("Not Part of a Payroll Run"))
 
 	def validate_payroll_approved(self):
@@ -95,10 +121,26 @@ class IsoftSalarySlip(Document):
 		Payroll Entries covering the same month would each produce a slip for the same
 		employee and both could be submitted, posted and paid. Cancelled slips are ignored,
 		so a cancel-and-amend correction still works.
+
+		Salary slips are compared with salary slips only: the Christmas bonus run shares the
+		December salary run's period. A bonus slip clashes with another submitted bonus
+		slip of the same employee and year.
 		"""
+		if self.is_bonus():
+			others = christmas.bonus_slips_in_year(self.employee, getdate(self.end_date).year,
+			                                       exclude=self.name)
+			if others:
+				frappe.throw(
+					_("{0} already has a submitted Christmas bonus slip for {1} ({2}). The "
+					  "Christmas bonus is paid once a year — cancel {2} first if it is wrong.").format(
+						frappe.bold(self.employee_name or self.employee),
+						getdate(self.end_date).year, others[0]),
+					title=_("Duplicate Christmas Bonus"))
+			return
 		clash = frappe.db.sql(
 			"""select name, payroll_entry from `tabIsoft Salary Slip`
 			where employee=%s and docstatus=1 and name!=%s
+			  and ifnull(run_type, 'Salary')='Salary'
 			  and start_date <= %s and end_date >= %s limit 1""",
 			(self.employee, self.name or "", getdate(self.end_date), getdate(self.start_date)),
 			as_dict=True,
@@ -146,6 +188,17 @@ class IsoftSalarySlip(Document):
 				  "amount.").format(", ".join(blocked)),
 				title=_("Component Disabled"),
 			)
+		if self.is_bonus() and not engine.component_enabled(settings, "SNA"):
+			frappe.throw(_("The Christmas bonus (Subsídio de Natal) is disabled in Isoft HR "
+			               "Settings. Enable it under Settings → Enabled Components first."),
+			             title=_("Component Disabled"))
+		if not self.is_bonus() and flt(self.subsidio_natal):
+			paid = christmas.bonus_slips_in_year(self.employee, getdate(self.end_date).year)
+			if paid:
+				frappe.throw(
+					_("The Christmas bonus for {0} was already paid by {1}. It cannot also be "
+					  "paid on a salary slip.").format(getdate(self.end_date).year, paid[0]),
+					title=_("Christmas Bonus Already Paid"))
 
 	def on_update_after_submit(self):
 		wf.assert_slip_not_locked(self)
@@ -239,17 +292,8 @@ class IsoftSalarySlip(Document):
 			profile.irt_table = settings.default_irt_table
 		self.irt_table = profile.irt_table
 
-		# Auto-fill the December Natal default on a brand-new slip when it wasn't set
-		# (e.g. a slip created directly, not via the payroll preview). HR can still edit it.
-		# Only when the component is switched on: filling it while it is off made the
-		# document reject itself on its own auto-filled value.
-		if (self.is_new() and self.subsidio_natal is None
-				and engine.component_enabled(settings, "SNA")):
-			self.subsidio_natal = engine.default_natal(
-				profile.base, settings.natal_rate,
-				frappe.db.get_value("Employee", self.employee, "date_of_joining"), self.end_date,
-				settings.get("natal_payment_month"),
-			)
+		# No December Natal on a salary slip: since November 2026 the Christmas bonus is
+		# paid by its own run (payroll/christmas.py), before the December salary.
 
 		# Overtime is entered as HOURS; the amount is calculated (services/overtime.py) and
 		# written back below. A draft from before that change carries only an amount, and
@@ -329,6 +373,54 @@ class IsoftSalarySlip(Document):
 				  "period.").format(flt(self.advance_deferred, 2),
 				                    self.employee_name or self.employee),
 				title=_("Advance Partially Recovered"), indicator="orange")
+
+	def compute_bonus(self):
+		"""A Christmas bonus slip: the bonus, IRT on the bonus alone, no INSS
+		(payroll/christmas.py). Nothing of the month — attendance, absences, overtime,
+		allowances, advances — belongs on it."""
+		profile = frappe.get_doc("Isoft Salary Profile", self.salary_profile)
+		settings = engine.get_settings()
+		table_name = profile.irt_table or settings.default_irt_table
+		self.irt_table = table_name
+		year = getdate(self.end_date).year
+		months = christmas.bonus_months(
+			frappe.db.get_value("Employee", self.employee, "date_of_joining"), year)
+		override = None
+		if (self.natal_override_reason or "").strip():
+			override = flt(self.subsidio_natal)
+			ceiling = christmas.full_year_amount(profile.base, settings.natal_rate)
+			if override < 0 or override > ceiling:
+				frappe.throw(_("The Christmas bonus for {0} cannot exceed a full year's bonus "
+				               "({1}).").format(frappe.bold(self.employee_name or self.employee),
+				                                frappe.utils.fmt_money(ceiling, 2)),
+				             title=_("Christmas Bonus Too High"))
+		res = christmas.compute_bonus(
+			profile.base, settings.natal_rate, months, self.posting_date or self.end_date,
+			company=self.company,
+			irt_table=frappe.get_cached_doc("IRT Table", table_name) if table_name else None,
+			override=override)
+
+		self.set("earnings", [])
+		for e in res["earnings"]:
+			self.append("earnings", e)
+		self.set("deductions", [])
+		for d in res["deductions"]:
+			self.append("deductions", d)
+		for field in ("productivity_bonus", "overtime_hours", "overtime_amount", "adiantamento",
+		              "subsidio_ferias", "absent_days", "absent_hours", "late_minutes",
+		              "absence_deduction", "late_deduction", "advance_recovery", "advance_deferred"):
+			self.set(field, 0)
+		self.subsidio_natal = res["natal_amount"]
+		self.natal_months = res["natal_months"]
+		self.natal_base = res["natal_base"]
+		for field in ("taxable_income", "gross_pay", "total_deduction", "net_pay",
+		              "ss_base", "ss_employee_rate", "ss_employee_amount", "ss_employer_rate",
+		              "ss_employer_amount", "employer_cost", "statutory_rate",
+		              "irt_bracket_from", "irt_bracket_to", "irt_excess_over", "irt_rate",
+		              "irt_parcela_fixa", "irt_amount", "food_exemption_applied",
+		              "transport_exemption_applied", "payment_factor"):
+			self.set(field, res.get(field))
+		self.irt_table = res.get("irt_table") or self.irt_table
 
 	def on_submit(self):
 		"""Book the advance recovery against the installments it came from."""
