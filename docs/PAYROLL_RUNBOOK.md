@@ -49,6 +49,38 @@ Three people, three roles. One person cannot run this alone, by design.
    → Mapa de Remunerações) and INSS Virtual.
 4. **Record the portal's reference.** Status stays `Generated` until you do.
 
+## 5. Christmas bonus (Subsídio de Natal) — its own run, first fortnight of December
+Paid before, and separately from, the December salary. Same three people, same steps.
+
+| Service in the year | Bonus (SN) |
+|---|---|
+| 12 months or more | Basic Salary × 50% |
+| fewer than 12 months | (Basic Salary × 50%) ÷ 12 × complete months |
+
+IRT is calculated on the bonus alone, from the IRT table. **No INSS** (employee or
+employer). Net = bonus − IRT. Examples: 400 000,00 for 12 months → bonus 200 000,00,
+IRT 20 500,00, net 179 500,00; 8 months → 133 333,33, IRT 0,00, net 133 333,33.
+
+1. **Settings → Enabled Components → Subsídio de Natal** must be on, and the rate is
+   *Natal rate* (50). A bonus run cannot be created while it is off.
+2. **Payroll → Run Type: Christmas Bonus**, choose the year and the payment date
+   (15 December by default), **Preview**. Each employee shows the basic salary (Salary
+   Profile, no absences), complete months to 31 December, bonus, IRT and net. Someone
+   admitted on 1 December gets 1/12; from 2 December, nothing. Suspended employees are
+   flagged — adjust them by hand.
+3. To change one employee's bonus, type the amount and **the reason** (required; never
+   above a full year's bonus). The approver sees every change with its reason.
+4. **Create Christmas Bonus Slips**, then submit for approval, approve, post and pay
+   exactly as for a salary run. The bank file is referenced `Natal_<year>`.
+5. The December **salary** run no longer adds the bonus; a bonus typed on a salary slip
+   after the bonus run is refused. One bonus run per company per year.
+6. **Payslip:** "Recibo de Subsídio de Natal", dated the payment date.
+7. **Declarations:** the December IRT map keeps one row per employee, with *Subsídio de
+   Natal* and *IRT Subsídio de Natal* in their own columns; the INSS map leaves the bonus
+   out.
+8. **Leavers:** a final settlement in the same year deducts the bonus already paid from
+   its own Christmas bonus line (never below zero, nothing clawed back).
+
 ## Changing a payroll account
 Accounts are chosen by Finance in **Settings → Account per Component**. Every change is
 recorded (who, when, old, new). After a payroll has been posted the change is flagged —
