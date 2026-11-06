@@ -15,7 +15,7 @@ Single, so each test that changes it restores the previous value in a cleanup.
 """
 
 import frappe
-from frappe.utils import add_days, flt, getdate
+from frappe.utils import add_days, add_months, flt, get_first_day, get_last_day, getdate
 
 from isoft_angola_hr.isoft_angola_hr.doctype.isoft_salary_slip.isoft_salary_slip import (
 	compute_working_days,
@@ -143,6 +143,14 @@ class TestTotalWorkingDays(WorkingDaysFixture):
 # The unit mismatch this module exists for
 # --------------------------------------------------------------------------- #
 class TestAbsenceIsCountedInTheSameUnit(WorkingDaysFixture):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		# Attendance cannot be marked for a future date, and early in a month the period's
+		# first Saturday still is one: use the previous, fully elapsed month.
+		cls.start = get_first_day(add_months(getdate(frappe.utils.nowdate()), -1))
+		cls.end = get_last_day(cls.start)
+
 	def test_a_full_day_absence_costs_exactly_one_day_under_calendar(self):
 		self.use_basis(CALENDAR)
 		before_twd, before_pay = compute_working_days(

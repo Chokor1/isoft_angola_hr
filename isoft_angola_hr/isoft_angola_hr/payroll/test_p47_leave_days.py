@@ -310,7 +310,13 @@ class TestBalance(LeaveDaysFixture):
 		from frappe.handler import execute_cmd
 
 		# the handler checks the HTTP method of the request it serves: a GET, as the form's
-		self.addCleanup(setattr, frappe.local, "request", getattr(frappe.local, "request", None))
+		# Put back exactly what was there: leaving request = None behind (rather than no
+		# request at all) breaks every later frappe.get_print, which reads request.path.
+		if hasattr(frappe.local, "request"):
+			self.addCleanup(setattr, frappe.local, "request", frappe.local.request)
+		else:
+			self.addCleanup(lambda: frappe.local.__delattr__("request")
+			                if hasattr(frappe.local, "request") else None)
 		frappe.local.request = frappe._dict(method="GET")
 		frappe.local.form_dict = frappe._dict(
 			cmd=LA_MODULE + ".get_number_of_leave_days", employee=self.weekday_employee,
