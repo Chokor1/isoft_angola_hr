@@ -364,3 +364,36 @@ class TestPostingAndBank(BonusRunFixture):
 		res = bank_export.generate(entry.name)
 		frappe.set_user("Administrator")
 		self.assertIn("Natal_{0}".format(YEAR), frappe.as_json(res))
+
+
+class TestBonusReceipt(BonusFixture):
+	def render(self, slip, lang):
+		from isoft_angola_hr.isoft_angola_hr.payroll.test_p42_payslip_receipt import render, text_of
+		return text_of(render(slip.name, lang=lang, doc=slip))
+
+	def test_the_portuguese_bonus_receipt(self):
+		slip = self.bonus_slip(submit=True)
+		text = self.render(slip, "pt")
+		for expected in ("Recibo de Subsídio de Natal", str(YEAR), "200 000,00", "20 500,00", "179 500,00"):
+			self.assertIn(expected, text)
+		self.assertNotIn("Segurança Social 3%", text)  # the INSS line; "N.º Segurança Social" is an employee field
+		self.assertNotIn("Adiantamento", text)
+		self.assertNotIn("Recibo de Vencimento", text.replace("Recibo de Subsídio de Natal", ""))
+
+	def test_the_english_bonus_receipt(self):
+		slip = self.bonus_slip(submit=True)
+		text = self.render(slip, "en")
+		self.assertIn("Christmas Bonus Receipt", text)
+		self.assertNotIn("Employee INSS", text)
+
+	def test_a_partial_year_shows_the_months(self):
+		emp = self.new_employee("Natal Parcial", "{0}-04-10".format(YEAR), 400000)
+		slip = self.bonus_slip(emp=emp, submit=True)
+		self.assertEqual(slip.natal_months, 8)
+		self.assertIn("Subsídio de Natal - 8/12", self.render(slip, "pt"))
+		self.assertIn("133 333,33", self.render(slip, "pt"))
+
+	def test_the_issue_date_is_the_payment_date(self):
+		from isoft_angola_hr.isoft_angola_hr.payroll import recibo
+		slip = self.bonus_slip()
+		self.assertEqual(recibo._issue_date(slip), getdate("{0}-12-15".format(YEAR)))

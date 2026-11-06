@@ -428,6 +428,10 @@ def _lines(doc):
 				# "Faltas - 2 dias 30 769,20": the count the amount was priced from, in the
 				# reader's language, as the receipt this format replaced printed it
 				line["label"] = _absence_label(abbr, doc)
+			if abbr == "SNA" and _is_bonus(doc) and 0 < cint(doc.get("natal_months")) < 12:
+				# a partial year: "Subsídio de Natal - 8/12"
+				line["label"] = _("Christmas Bonus - {0}/12", context=TRANSLATION_CONTEXT).format(
+					cint(doc.get("natal_months")))
 			if cint(row.get("do_not_include_in_total")):
 				if abbr == TAXABLE_INCOME_ABBR:
 					continue
@@ -521,16 +525,27 @@ def _period_label(doc):
 
 	Month names come from Babel through ``formatdate``, which reads the language of the
 	current request; ``_periodo`` above stays Portuguese for the older format.
+
+	A Christmas bonus receipt prints the year: the bonus is the year's, not a month's.
 	"""
 	end = getdate(doc.end_date)
+	if _is_bonus(doc):
+		return str(end.year)
 	name = formatdate(end, "MMMM")
 	return "{0} {1}".format(name[:1].upper() + name[1:], end.year)
 
 
 def _issue_date(doc):
 	"""The receipt's issue date: the last day of the month the period ends in (HR,
-	October 2026), e.g. 31-07-2026 for a 23 June - 22 July period."""
+	October 2026), e.g. 31-07-2026 for a 23 June - 22 July period. A Christmas bonus is
+	paid in the first fortnight of December, so its receipt is dated the payment date."""
+	if _is_bonus(doc) and doc.get("posting_date"):
+		return getdate(doc.get("posting_date"))
 	return get_last_day(getdate(doc.end_date))
+
+
+def _is_bonus(doc):
+	return doc.get("run_type") == "Christmas Bonus"
 
 
 def _company_logo(company):
@@ -687,6 +702,7 @@ def get_context(doc):
 		"company_logo": _company_logo(doc.get("company")),
 		"employee": employee,
 		"document": doc.get("name"),
+		"is_bonus": _is_bonus(doc),
 		"payroll_reference": doc.get("payroll_entry"),
 		"period_label": _period_label(doc),
 		"issue_date": _issue_date(doc),

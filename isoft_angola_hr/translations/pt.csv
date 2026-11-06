@@ -3026,3 +3026,5 @@
 "Christmas Bonus Already Paid","Subsídio de Natal Já Pago"
 "Christmas bonus run {0} ({1}) already exists for {2} in {3}. Cancel it before creating another.","O processamento de Subsídio de Natal {0} ({1}) já existe para {2} em {3}. Cancele-o antes de criar outro."
 "Salary slip {0} is a {1} slip but payroll {2} is a {3} run.","O recibo {0} é do tipo {1} mas o processamento {2} é do tipo {3}."
+"Christmas Bonus Receipt","Recibo de Subsídio de Natal","Recibo de Vencimento"
+"Christmas Bonus - {0}/12","Subsídio de Natal - {0}/12","Recibo de Vencimento"
