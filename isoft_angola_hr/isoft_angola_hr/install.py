@@ -259,6 +259,7 @@ def after_install():
 	seed_hr_controls()
 	seed_hr_catalogues()
 	setup_custom_fields()
+	backfill_run_type()
 	setup_education_levels()
 	seed_defaults()
 	seed_absence_reasons()
@@ -575,6 +576,15 @@ def seed_absence_reasons():
 
 def setup_custom_fields():
 	create_custom_fields(CUSTOM_FIELDS, ignore_validate=True)
+	frappe.db.commit()
+
+
+def backfill_run_type():
+	"""Every payroll run and slip from before the Christmas bonus run (Nov 2026) is a
+	salary one. The column's default covers rows that existed when it was added; this
+	covers any row a direct insert left blank since."""
+	for table in ("tabIsoft Payroll Entry", "tabIsoft Salary Slip"):
+		frappe.db.sql("update `{0}` set run_type='Salary' where ifnull(run_type,'')=''".format(table))
 	frappe.db.commit()
 
 

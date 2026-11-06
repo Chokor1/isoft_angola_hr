@@ -7,6 +7,7 @@
  "engine": "InnoDB",
  "field_order": [
   "company",
+  "run_type",
   "posting_date",
   "column_break_3",
   "start_date",
@@ -68,6 +69,7 @@
  ],
  "fields": [
   {"fieldname": "company", "fieldtype": "Link", "label": "Company", "options": "Company", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "run_type", "fieldtype": "Select", "label": "Run Type", "options": "Salary\nChristmas Bonus", "default": "Salary", "set_only_once": 1, "in_list_view": 1, "in_standard_filter": 1, "description": "Christmas Bonus: the Subsídio de Natal paid in the first fortnight of December, separately from the December salary (IRT only, no INSS)."},
   {"fieldname": "posting_date", "fieldtype": "Date", "label": "Posting Date", "default": "Today", "reqd": 1},
   {"fieldname": "column_break_3", "fieldtype": "Column Break"},
   {"fieldname": "start_date", "fieldtype": "Date", "label": "Start Date", "reqd": 1, "in_list_view": 1},
@@ -133,7 +135,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-08-10 00:00:00.000000",
+ "modified": "2026-11-06 09:50:49.457391",
  "modified_by": "Administrator",
  "module": "Isoft Angola HR",
  "name": "Isoft Payroll Entry",
