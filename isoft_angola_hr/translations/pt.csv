@@ -3043,3 +3043,4 @@
 "Christmas Bonus Basic Salary","Salário Base do Subsídio de Natal"
 "Christmas Bonus Override Reason","Motivo da Alteração do Subsídio de Natal"
 "Required when the Subsídio de Natal differs from the formula.","Obrigatório quando o Subsídio de Natal difere da fórmula."
+"Salary payment: payroll {0} ({1} employee(s))","Pagamento de salários: processamento {0} ({1} funcionário(s))"

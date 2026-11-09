@@ -1728,20 +1728,12 @@ def make_journal_entry(salary_slip):
 	return je.name
 
 
-@frappe.whitelist()
-def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
-                       bank_reference=None):
-	"""Post and SUBMIT the salary payment (a Bank Entry Journal):
-	Dr Payroll Payable (net) ; Cr Bank/Cash. Clears the payable booked by the accrual.
-	"""
-	_guard(perms.PAYROLL_CONFIRM_PAYMENT)
-	slip = frappe.get_doc("Isoft Salary Slip", salary_slip)
+def _assert_slip_payable(slip):
+	"""A slip may be paid once it is submitted, authorised for payment, has a positive net
+	and its accrual is in the ledger (so the payment clears a payable that exists)."""
 	if slip.docstatus != 1:
 		frappe.throw(_("Submit the salary slip before posting a Payment Entry."))
 	_assert_payment_authorized(slip)
-	existing = _existing_entry(slip.name, "payment_entry")
-	if existing:
-		return existing
 	if flt(slip.net_pay) <= 0:
 		frappe.throw(_("Net pay is zero or negative — nothing to pay for {0}.").format(
 			slip.employee_name or slip.employee))
@@ -1751,35 +1743,49 @@ def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
 			  "clears a payable that actually exists in the ledger.").format(
 				frappe.bold(slip.employee_name or slip.employee))
 		)
-	payroll_accounts.assert_payable([slip], payment_account=payment_account)
 
+
+def _post_salary_payment(slips, payment_account=None, posting_date=None, bank_reference=None,
+                         remark=None):
+	"""ONE submitted Bank Entry paying every slip given: a debit to each employee's payroll
+	payable for their net pay, one credit to the bank/cash account for the total.
+
+	Finance (November 2026) keys a payroll payment as a single bank movement, and the bank
+	transfer is one movement too: 81 entries for one transfer were 81 vouchers to file and
+	reconcile. Every slip's ``payment_entry`` points at the same voucher, so cancelling it
+	un-pays them all (unlink_cancelled_payroll_entry) and they can be paid again.
+	"""
 	s = frappe.get_single("Isoft HR Settings")
 	pay_acc = payment_account or s.get("salary_payment_account")
 	if not pay_acc:
 		frappe.throw(_("Configure the Salary Payment (Bank/Cash) account in Settings first."))
-	payable_account = _payable_account(slip, s)
-	cost_center = _payroll_cost_center(slip)
+	first = slips[0]
+	total = flt(sum(flt(slip.net_pay) for slip in slips), 2)
 
 	je = frappe.new_doc("Journal Entry")
 	je.voucher_type = "Bank Entry"
-	je.company = slip.company
-	je.posting_date = getdate(posting_date) if posting_date else (slip.posting_date or slip.end_date)
-	je.user_remark = _("Salary payment: {0}").format(slip.name)
+	je.company = first.company
+	je.posting_date = getdate(posting_date) if posting_date else (first.posting_date or first.end_date)
+	je.user_remark = remark or _("Salary payment: {0}").format(first.name)
 	# ERPNext requires a reference on a Bank Entry. Use the same salary reference the
 	# bank transfer file carries, so the ledger and the bank file reconcile.
 	# ERPNext refuses to submit a Bank Entry without a reference, so one is always
 	# generated. When Finance has the bank's own reference they pass it here and it
 	# is used instead — the field never ends up empty either way (§18).
-	je.cheque_no = (bank_reference or "").strip() or _salary_reference(slip.end_date, slip.run_type)
+	je.cheque_no = (bank_reference or "").strip() or _salary_reference(first.end_date, first.run_type)
 	je.cheque_date = je.posting_date
+	for slip in slips:
+		payable_account = _payable_account(slip, s)
+		je.append("accounts", {
+			"account": payable_account, "cost_center": _payroll_cost_center(slip),
+			"debit_in_account_currency": flt(slip.net_pay),
+			**_party_fields(payable_account, slip.employee),
+		})
 	je.append("accounts", {
-		"account": payable_account, "cost_center": cost_center,
-		"debit_in_account_currency": flt(slip.net_pay),
-		**_party_fields(payable_account, slip.employee),
-	})
-	je.append("accounts", {
-		"account": pay_acc, "cost_center": cost_center,
-		"credit_in_account_currency": flt(slip.net_pay),
+		"account": pay_acc,
+		"cost_center": _payroll_cost_center(first) if len(slips) == 1
+		else frappe.db.get_value("Company", first.company, "cost_center"),
+		"credit_in_account_currency": total,
 	})
 	# Posted by the application on behalf of an already-authorised action, not by the user
 	# browsing to Journal Entry. The capability layer decided this above
@@ -1792,8 +1798,29 @@ def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
 	je.flags.ignore_permissions = True
 	je.insert()
 	je.submit()
-	slip.db_set("payment_entry", je.name)
+	for slip in slips:
+		slip.db_set("payment_entry", je.name)
 	return je.name
+
+
+@frappe.whitelist()
+def make_payment_entry(salary_slip, payment_account=None, posting_date=None,
+                       bank_reference=None):
+	"""Post and SUBMIT one employee's salary payment (a Bank Entry Journal):
+	Dr Payroll Payable (net) ; Cr Bank/Cash. Clears the payable booked by the accrual.
+	Paying a whole run is make_bulk_payment_entry: one entry for everybody.
+	"""
+	_guard(perms.PAYROLL_CONFIRM_PAYMENT)
+	slip = frappe.get_doc("Isoft Salary Slip", salary_slip)
+	if slip.docstatus == 1:
+		existing = _existing_entry(slip.name, "payment_entry")
+		if existing:
+			_assert_payment_authorized(slip)
+			return existing
+	_assert_slip_payable(slip)
+	payroll_accounts.assert_payable([slip], payment_account=payment_account)
+	return _post_salary_payment([slip], payment_account=payment_account,
+	                            posting_date=posting_date, bank_reference=bank_reference)
 
 
 def unlink_cancelled_payroll_entry(doc, method=None):
@@ -1907,24 +1934,34 @@ def make_bulk_payment_entry(name, payment_account=None, posting_date=None, emplo
 			continue
 		pending.append(slip)
 	payroll_accounts.assert_payable(pending, payment_account=payment_account)
+	# Every payable slip goes into ONE bank entry (Finance, November 2026); a slip that
+	# cannot be paid is reported and left out rather than holding up everybody else.
+	payable = []
 	for slip in pending:
-		sname = slip.name
 		try:
-			make_payment_entry(sname, payment_account=payment_account, posting_date=posting_date,
-			                   bank_reference=bank_reference)
-			created += 1
-			total += flt(slip.net_pay)
+			_assert_slip_payable(slip)
+			payable.append(slip)
 		except Exception as e:
-			errors.append(f"{slip.employee_name}: {str(e)}")
+			frappe.clear_last_message()
+			errors.append(f"{slip.employee_name}: {frappe.utils.strip_html(str(e))}")
 
-	if errors and not created:
+	if errors and not payable:
 		frappe.throw(_("No salary payment could be posted.<br><br>{0}").format(
 			"<br>".join(errors[:10])), title=_("Payment Failed"))
+
+	journal_entry = None
+	if payable:
+		journal_entry = _post_salary_payment(
+			payable, payment_account=payment_account, posting_date=posting_date,
+			bank_reference=bank_reference,
+			remark=_("Salary payment: payroll {0} ({1} employee(s))").format(entry.name, len(payable)))
+		created = len(payable)
+		total = flt(sum(flt(slip.net_pay) for slip in payable), 2)
 
 	entry.reload()
 	status = wf.refresh_payment_state(entry)
 	return {"created": created, "skipped": skipped, "total": total, "errors": errors,
-	        "status": status}
+	        "status": status, "journal_entry": journal_entry}
 
 
 @frappe.whitelist()
@@ -2041,11 +2078,14 @@ def _assert_payroll_cancellable(entry):
 	entries, then cancel the payroll — never silently detach documents that a ledger
 	still refers to.
 	"""
-	live = []
+	live, seen = [], set()
 	for row in wf.slip_rows(entry):
 		for field, label in (("payment_entry", _("payment")), ("journal_entry", _("accrual"))):
 			name = row.get(field)
+			if name in seen:
+				continue  # one payment entry covers the whole run: list it once
 			if name and cint(frappe.db.get_value("Journal Entry", name, "docstatus")) == 1:
+				seen.add(name)
 				live.append("{0} — {1} {2}".format(row["employee_name"] or row["employee"], label, name))
 	if live:
 		frappe.throw(
