@@ -58,6 +58,12 @@ class IsoftAttendanceOccurrence(Document):
 		changed = (self.status != before.status) or (self.justification_reason != before.justification_reason)
 		if not changed:
 			return
+		if self.status == "Unjustified" and before.status == "Pending Justification":
+			# Once the window has closed, Unjustified is the outcome the daily job applies
+			# anyway (auto_flag_unjustified); marking it now only applies the rule early.
+			# An occurrence recorded more than 5 days after its date is born past its
+			# window, and refusing this left it Pending with no way to mark it.
+			return
 		if not self.is_extraordinary:
 			frappe.throw(_(
 				"This occurrence is locked — its 5-day justification window has passed. "

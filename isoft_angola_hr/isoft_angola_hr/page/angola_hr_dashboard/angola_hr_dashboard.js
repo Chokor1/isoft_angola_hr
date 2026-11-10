@@ -2069,7 +2069,7 @@ class AngolaHR {
 				${locked ? `<span class="ahr-lock-note">${__("Locked — over 5 days. Re-justify only via Extraordinary override (HR Manager).")}</span>` : ""}
 				${!locked && o.status !== "Justified" ? `<button class="btn btn-xs btn-primary occ-justify">${__("Justify")}</button>` : ""}
 				${locked ? `<button class="btn btn-xs btn-primary occ-extra">${__("Extraordinary Re-justify")}</button>` : ""}
-				${!locked && o.status !== "Unjustified" ? `<button class="btn btn-xs btn-default occ-unjust">${__("Mark Unjustified")}</button>` : ""}
+				${o.status !== "Unjustified" && (!locked || o.status === "Pending Justification") ? `<button class="btn btn-xs btn-default occ-unjust">${__("Mark Unjustified")}</button>` : ""}
 				${!locked && o.status !== "Pending Justification" ? `<button class="btn btn-xs btn-default occ-pending">${__("Reset to Pending")}</button>` : ""}
 				<button class="btn btn-xs btn-danger occ-delete">${__("Delete")}</button>
 			</div>`);
