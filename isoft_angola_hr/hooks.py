@@ -127,7 +127,10 @@ jenv = {
 override_doctype_class = {
 	# Half Day / Absent thresholds scaled to the day's scheduled hours, for Shift Types
 	# that use this app's per-weekday schedule. Pass-through when they don't.
-	"Shift Type": "isoft_angola_hr.isoft_angola_hr.shift_type_override.ShiftType"
+	"Shift Type": "isoft_angola_hr.isoft_angola_hr.shift_type_override.ShiftType",
+	# Saves the linked user and the leave/expense approvers only when they actually change:
+	# ERPNext re-saved them on every Employee save, as whoever edited the employee.
+	"Employee": "isoft_angola_hr.isoft_angola_hr.employee_override.IsoftEmployee",
 }
 
 # override_doctype_class = {
