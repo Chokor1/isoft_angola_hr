@@ -116,9 +116,20 @@ CUSTOM_FIELDS = {
 			"insert_after": "custom_nif",
 		},
 		{
+			# HR, November 2026: foreign nationals are exempt from INSS — no employee (3%)
+			# or employer (8%) contribution is calculated for them (payroll/engine.py).
+			"fieldname": "custom_foreign_national",
+			"label": "Foreign National (exempt from INSS)",
+			"fieldtype": "Check",
+			"default": "0",
+			"insert_after": "custom_inss_number",
+			"description": "No INSS is calculated for a foreign national: neither the employee's "
+			               "contribution nor the company's.",
+		},
+		{
 			"fieldname": "isoft_angola_hr_cb",
 			"fieldtype": "Column Break",
-			"insert_after": "custom_inss_number",
+			"insert_after": "custom_foreign_national",
 		},
 		{
 			"fieldname": "custom_dependents",

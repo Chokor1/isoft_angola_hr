@@ -45,7 +45,7 @@ def onboarding_checklist(employee):
 		["name", "employee_name", "company", "department", "designation", "branch",
 		 "date_of_joining", "reports_to", "holiday_list", "default_shift",
 		 "payroll_cost_center", "custom_nif", "custom_inss_number", "custom_iban",
-		 "cell_number", "personal_email", "emergency_phone_number", "person_to_be_contacted",
+		 "custom_foreign_national", "cell_number", "personal_email", "emergency_phone_number", "person_to_be_contacted",
 		 "date_of_birth", "gender", "status", "user_id"], as_dict=True)
 	if not row:
 		frappe.throw(_("Employee {0} does not exist.").format(employee))
@@ -86,7 +86,8 @@ def onboarding_checklist(employee):
 	# Statutory and banking
 	add("nif", _("NIF"), (row.custom_nif or "").strip(),
 	    hint=_("Needed for the IRT report, not for payment."))
-	add("inss", _("Social Security number"), (row.custom_inss_number or "").strip(),
+	add("inss", _("Social Security number"), (row.custom_inss_number or "").strip()
+	    or (_("Not applicable (foreign national)") if cint(row.custom_foreign_national) else ""),
 	    hint=_("Needed for the INSS report, not for payment."))
 	add("iban", _("IBAN"), (row.custom_iban or "").strip(),
 	    hint=_("The employee cannot be included in the bank transfer file without it."))
@@ -224,7 +225,8 @@ def hr_readiness(company=None):
 	employees = frappe.get_all(
 		"Employee", filters={"status": "Active", "company": company},
 		fields=["name", "employee_name", "custom_nif", "custom_inss_number", "custom_iban",
-		        "reports_to", "department", "designation"], limit_page_length=5000)
+		        "custom_foreign_national", "reports_to", "department", "designation"],
+		limit_page_length=5000)
 	names = [e.name for e in employees]
 
 	with_contract = set()
@@ -257,7 +259,7 @@ def hr_readiness(company=None):
 	add(warnings, "HR-003", _("Employees without a NIF"),
 	    count(lambda e: not (e.custom_nif or "").strip()), _("Collect the NIF."))
 	add(warnings, "HR-004", _("Employees without a Social Security number"),
-	    count(lambda e: not (e.custom_inss_number or "").strip()),
+	    count(lambda e: not (e.custom_inss_number or "").strip() and not cint(e.custom_foreign_national)),
 	    _("Collect the INSS number."))
 	add(warnings, "HR-005", _("Employees without an IBAN"),
 	    count(lambda e: not (e.custom_iban or "").strip()), _("Collect the IBAN."))

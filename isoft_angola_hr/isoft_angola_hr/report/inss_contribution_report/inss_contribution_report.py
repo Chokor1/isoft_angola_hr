@@ -26,6 +26,8 @@ def execute(filters=None):
 	conditions, values = ru.slip_conditions(filters)
 	# The Christmas bonus carries no INSS (HR, November 2026): salary slips only.
 	conditions += " and ifnull(s.run_type, 'Salary') = 'Salary'"
+	# foreign nationals are exempt from INSS (HR, November 2026)
+	conditions += " and ifnull(e.custom_foreign_national, 0) = 0"
 
 	rows = frappe.db.sql(
 		"""select s.name, s.employee, s.employee_name, e.department,

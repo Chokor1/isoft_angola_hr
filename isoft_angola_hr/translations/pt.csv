@@ -3044,3 +3044,7 @@
 "Christmas Bonus Override Reason","Motivo da Alteração do Subsídio de Natal"
 "Required when the Subsídio de Natal differs from the formula.","Obrigatório quando o Subsídio de Natal difere da fórmula."
 "Salary payment: payroll {0} ({1} employee(s))","Pagamento de salários: processamento {0} ({1} funcionário(s))"
+"Foreign National (exempt from INSS)","Estrangeiro (isento de INSS)"
+"No INSS is calculated for a foreign national: neither the employee's contribution nor the company's.","Não é calculado INSS para um estrangeiro: nem a contribuição do trabalhador nem a da empresa."
+"Exempt (foreign national)","Isento (estrangeiro)"
+"Not applicable (foreign national)","Não aplicável (estrangeiro)"

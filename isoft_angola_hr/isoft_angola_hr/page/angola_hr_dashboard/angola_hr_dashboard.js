@@ -1495,6 +1495,7 @@ class AngolaHR {
 				{ fieldtype: "Section Break", label: __("Angola HR") },
 				{ fieldname: "custom_nif", label: __("NIF (Tax ID)"), fieldtype: "Data" },
 				{ fieldname: "custom_inss_number", label: __("Social Security No (INSS)"), fieldtype: "Data" },
+				{ fieldname: "custom_foreign_national", label: __("Foreign National (exempt from INSS)"), fieldtype: "Check", default: 0 },
 				{ fieldtype: "Column Break" },
 				{ fieldname: "custom_dependents", label: __("Dependents"), fieldtype: "Int", default: 0 },
 				{ fieldname: "custom_payroll_payable_account", label: __("Payroll Payable Account"), fieldtype: "Link",
@@ -1687,7 +1688,7 @@ class AngolaHR {
 				<div><b>${__("Designation")}:</b> ${e.designation || "-"}</div>
 				<div><b>${__("Department")}:</b> ${e.department || "-"}</div>
 				<div><b>NIF:</b> ${e.custom_nif || "-"}</div>
-				<div><b>INSS:</b> ${e.custom_inss_number || "-"}</div>
+				<div><b>INSS:</b> ${cint(e.custom_foreign_national) ? __("Exempt (foreign national)") : (e.custom_inss_number || "-")}</div>
 				<div><b>${__("Dependents")}:</b> ${e.custom_dependents || 0}</div>
 				<div><b>${__("Payroll Payable Account")}:</b> ${e.custom_payroll_payable_account || "-"}</div>
 				<div><b>IBAN:</b> ${e.custom_iban ? frappe.utils.escape_html(e.custom_iban) : "-"}</div>
@@ -1759,6 +1760,7 @@ class AngolaHR {
 				{ fieldtype: "Column Break" },
 				{ fieldname: "custom_nif", label: __("NIF (Tax ID)"), fieldtype: "Data", default: e.custom_nif },
 				{ fieldname: "custom_inss_number", label: __("Social Security No (INSS)"), fieldtype: "Data", default: e.custom_inss_number },
+				{ fieldname: "custom_foreign_national", label: __("Foreign National (exempt from INSS)"), fieldtype: "Check", default: cint(e.custom_foreign_national) },
 				{ fieldname: "custom_dependents", label: __("Dependents"), fieldtype: "Int", default: e.custom_dependents },
 				{ fieldtype: "Section Break", label: __("Payroll") },
 				{ fieldname: "custom_payroll_payable_account", label: __("Payroll Payable Account"), fieldtype: "Link",

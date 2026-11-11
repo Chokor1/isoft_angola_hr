@@ -32,7 +32,7 @@ def execute(filters=None):
 
 	employees = frappe.db.sql(
 		"""select e.name, e.employee_name, e.company, e.department, e.designation,
-			e.reports_to, e.holiday_list, e.default_shift, e.custom_nif, e.custom_inss_number,
+			e.reports_to, e.holiday_list, e.default_shift, e.custom_nif, e.custom_inss_number, e.custom_foreign_national,
 			e.custom_iban, e.emergency_phone_number, e.user_id
 		from `tabEmployee` e where {0} order by e.department, e.employee_name""".format(
 			" and ".join(conditions)), values, as_dict=True)
@@ -53,7 +53,8 @@ def execute(filters=None):
 	for e in employees:
 		flags = {
 			"nif": 1 if (e.custom_nif or "").strip() else 0,
-			"inss": 1 if (e.custom_inss_number or "").strip() else 0,
+			# a foreign national is exempt from INSS: no number to collect
+			"inss": 1 if (e.custom_inss_number or "").strip() or cint(e.custom_foreign_national) else 0,
 			"iban": 1 if (e.custom_iban or "").strip() else 0,
 			"contract": 1 if e.name in with_contract else 0,
 			"salary_profile": 1 if e.name in with_profile else 0,

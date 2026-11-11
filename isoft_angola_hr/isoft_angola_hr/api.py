@@ -351,8 +351,9 @@ def get_employee(name):
 	emp = frappe.db.get_value(
 		"Employee", name,
 		["name", "employee_name", "designation", "department", "company", "date_of_joining",
-		 "custom_nif", "custom_inss_number", "custom_dependents", "custom_payroll_payable_account",
-		 "custom_iban", "custom_insurance", "default_shift", "cell_number", "personal_email"],
+		 "custom_nif", "custom_inss_number", "custom_foreign_national", "custom_dependents",
+		 "custom_payroll_payable_account", "custom_iban", "custom_insurance", "default_shift",
+		 "cell_number", "personal_email"],
 		as_dict=True,
 	)
 	profile = frappe.get_all(
@@ -1303,6 +1304,7 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 				"absent_days": days["absent_days"], "absent_hours": days["absent_hours"],
 				"late_minutes": days["late_minutes"],
 				"start_date": start, "end_date": end,
+				"inss_exempt": engine.inss_exempt(e.name),
 			}, settings=settings, on_date=end, employee=e.employee_name)
 		except frappe.ValidationError as exc:
 			out.append(_exception_row(e, start, end, frappe.utils.strip_html(str(exc))))
@@ -2674,6 +2676,12 @@ def settlement_preview(data):
 		inputs["overtime"] = fs.collect_unpaid_overtime(
 			d.get("employee"), d.get("company"), flt(d.get("base")),
 			d.get("salary_period_start"), d.get("termination_date"))
+		# the same figures the saved settlement uses (IsoftFinalSettlement.inputs)
+		from isoft_angola_hr.isoft_angola_hr.payroll import christmas, engine
+		year = getdate(d.get("termination_date")).year
+		inputs["inss_exempt"] = engine.inss_exempt(d.get("employee"))
+		inputs["christmas_bonus_paid"] = christmas.paid_in_year(d.get("employee"), year)
+		inputs["christmas_bonus_slips"] = christmas.bonus_slips_in_year(d.get("employee"), year)
 	res = fs.compute(inputs)
 	res["payment_deadline"] = fs.payment_deadline(d.get("termination_date"),
 	                                              d.get("reason_key") or None)
@@ -3394,6 +3402,7 @@ def create_employee(data):
 		"branch": d.get("branch"),
 		"custom_nif": d.get("custom_nif"),
 		"custom_inss_number": d.get("custom_inss_number"),
+		"custom_foreign_national": cint(d.get("custom_foreign_national")),
 		"custom_dependents": cint(d.get("custom_dependents")),
 		"custom_payroll_payable_account": d.get("custom_payroll_payable_account") or None,
 		"custom_iban": d.get("custom_iban") or None,
@@ -3418,6 +3427,8 @@ def update_employee(name, data):
 			emp.set(f, d.get(f) or None)
 	if "custom_dependents" in d:
 		emp.custom_dependents = cint(d.get("custom_dependents"))
+	if "custom_foreign_national" in d:
+		emp.custom_foreign_national = cint(d.get("custom_foreign_national"))
 	if "custom_payroll_payable_account" in d:
 		emp.custom_payroll_payable_account = d.get("custom_payroll_payable_account") or None
 	emp.save()

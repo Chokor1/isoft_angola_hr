@@ -480,7 +480,8 @@ def data_counts(company):
 				then 1 else 0 end) as no_profile,
 			sum(case when ifnull(e.custom_iban, '') = '' then 1 else 0 end) as no_iban,
 			sum(case when ifnull(e.custom_nif, '') = '' then 1 else 0 end) as no_nif,
-			sum(case when ifnull(e.custom_inss_number, '') = '' then 1 else 0 end) as no_inss
+			sum(case when ifnull(e.custom_inss_number, '') = ''
+			          and ifnull(e.custom_foreign_national, 0) = 0 then 1 else 0 end) as no_inss
 		from `tabEmployee` e where e.status = 'Active' and e.company = %s""",
 		company, as_dict=True)[0]
 

@@ -341,6 +341,7 @@ class IsoftSalarySlip(Document):
 		due, self._advance_plan = advances.due_recovery(
 			self.employee, self.start_date, self.end_date, exclude_slip=self.name)
 		inputs["advance_recovery"] = due
+		inputs["inss_exempt"] = engine.inss_exempt(self.employee)
 		res = engine.compute_slip(profile, inputs, settings=settings, on_date=self.end_date,
 		                          employee=self.employee_name or self.employee)
 

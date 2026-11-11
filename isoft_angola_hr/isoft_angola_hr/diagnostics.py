@@ -65,7 +65,8 @@ def _employees_missing_statutory_ids():
 	return frappe.db.sql(
 		"""select name, employee_name,
 		       case when ifnull(custom_nif,'')='' then 1 else 0 end no_nif,
-		       case when ifnull(custom_inss_number,'')='' then 1 else 0 end no_inss,
+		       case when ifnull(custom_inss_number,'')='' and ifnull(custom_foreign_national,0)=0
+		            then 1 else 0 end no_inss,
 		       case when ifnull(custom_iban,'')='' then 1 else 0 end no_iban
 		from `tabEmployee` where status='Active'
 		having no_nif or no_inss or no_iban

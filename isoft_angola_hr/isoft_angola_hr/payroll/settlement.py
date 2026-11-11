@@ -687,6 +687,9 @@ def compute(inputs):
 	rates = get_statutory_rates(company=inp.get("company"), on_date=term)
 	ss_rate = require_rate(rates, "ss_employee_rate", _("Employee Social Security rate"))
 	ss_employer_rate = flt(rates.get("ss_employer_rate"))
+	if cint(inp.get("inss_exempt")):
+		# a foreign national is exempt from INSS (HR, November 2026)
+		inss_base = 0.0
 	inss = _r2(inss_base * ss_rate / 100.0)
 	inss_employer = _r2(inss_base * ss_employer_rate / 100.0)
 

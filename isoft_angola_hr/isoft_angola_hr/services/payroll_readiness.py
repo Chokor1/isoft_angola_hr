@@ -257,7 +257,7 @@ def _eligible_employees(company, start, end, department=None, branch=None, desig
 		"Employee", filters=filters,
 		fields=["name", "employee_name", "department", "designation", "date_of_joining",
 		        "relieving_date", "custom_nif", "custom_inss_number", "custom_iban",
-		        "salary_mode"],
+		        "salary_mode", "custom_foreign_national"],
 		order_by="employee_name", limit_page_length=5000,
 	)
 
@@ -462,7 +462,8 @@ def evaluate(company, start_date, end_date, department=None, branch=None, design
 		if not (e.get("custom_nif") or "").strip():
 			exceptions.append(_exception("EXC-008", e.name, e.employee_name,
 			                             _("No NIF recorded (needed for the IRT report).")))
-		if not (e.get("custom_inss_number") or "").strip():
+		# a foreign national is exempt from INSS and needs no number (HR, November 2026)
+		if not (e.get("custom_inss_number") or "").strip() and not cint(e.get("custom_foreign_national")):
 			exceptions.append(_exception(
 				"EXC-009", e.name, e.employee_name,
 				_("No Social Security number recorded (needed for the INSS report).")))

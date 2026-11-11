@@ -76,7 +76,8 @@ _SLIP_FIELDS = """s.name, s.employee, s.employee_name, e.custom_nif as nif,
 			s.start_date, s.end_date, s.payment_days, s.total_working_days,
 			s.gross_pay, s.taxable_income, s.irt_amount, s.irt_rate, s.irt_parcela_fixa,
 			s.ss_base, s.ss_employee_rate, s.ss_employee_amount,
-			s.ss_employer_rate, s.ss_employer_amount, s.net_pay, s.subsidio_natal"""
+			s.ss_employer_rate, s.ss_employer_amount, s.net_pay, s.subsidio_natal,
+			ifnull(e.custom_foreign_national, 0) as foreign_national"""
 
 
 def _query(company, period_start, period_end, run_type):
@@ -100,7 +101,8 @@ def _slips(company, period_start, period_end, submission_type=None):
 	for row in rows:
 		row.natal_amount, row.natal_irt = 0.0, 0.0
 	if submission_type == INSS:
-		return rows
+		# foreign nationals are exempt from INSS (HR, November 2026): not on the map
+		return [r for r in rows if not cint(r.foreign_national)]
 	by_employee = {r.employee: r for r in rows}
 	for bonus in _query(company, period_start, period_end, "Christmas Bonus"):
 		row = by_employee.get(bonus.employee)

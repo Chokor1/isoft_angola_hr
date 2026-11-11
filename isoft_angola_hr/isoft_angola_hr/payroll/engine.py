@@ -287,6 +287,13 @@ def compute_settlement(inputs):
 	}
 
 
+def inss_exempt(employee):
+	"""True for a foreign national (Employee.custom_foreign_national): exempt from INSS."""
+	if not employee or not frappe.get_meta("Employee").has_field("custom_foreign_national"):
+		return False
+	return bool(cint(frappe.db.get_value("Employee", employee, "custom_foreign_national")))
+
+
 def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, rates=None,
                  employee=None):
 	"""Compute an Angola salary slip.
@@ -381,6 +388,10 @@ def compute_slip(profile, inputs, settings=None, on_date=None, irt_table=None, r
 	# The EMPLOYER contribution deliberately uses the SAME base as the employee one,
 	# because no authoritative source establishing a different base was available.
 	ss_base = sb + af + sda + sdt + ppd + hex_ + sna
+	if cint(inputs.get("inss_exempt")):
+		# A foreign national is exempt from INSS (HR, November 2026): no contribution base,
+		# no employee 3%, no employer 8% — and so nothing comes off before IRT.
+		ss_base, ss_rate, ss_employer_rate = 0.0, 0.0, 0.0
 	ctss3 = flt(ss_base * ss_rate / 100.0, 2)
 	# Employer contribution: a company cost. It must never enter gross, the taxable
 	# base, the deductions or net pay.

@@ -77,6 +77,7 @@ class IsoftFinalSettlement(Document):
 			"fixed_term_under_one_year": cint(self.fixed_term_under_one_year),
 			"ferias_rate": flt(self.ferias_rate),
 			"natal_rate": flt(self.natal_rate),
+			"inss_exempt": engine.inss_exempt(self.employee),
 			# the Christmas bonus a bonus run already paid this year (deducted, never below 0)
 			"christmas_bonus_paid": christmas.paid_in_year(
 				self.employee, getdate(self.termination_date).year) if self.termination_date else 0.0,
