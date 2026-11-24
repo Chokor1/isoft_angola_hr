@@ -1,0 +1,32 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "creation": "2026-11-24 11:15:15.000000",
+ "description": "HR's unfinished payroll preview (hours, bonuses, advances, holiday and Christmas amounts, who is included) for one company and period, kept until the salary slips are created or the draft is discarded.",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["company", "start_date", "end_date", "data", "saved_by", "saved_at"],
+ "fields": [
+  {"fieldname": "company", "fieldtype": "Link", "label": "Company", "options": "Company", "reqd": 1, "in_list_view": 1, "in_standard_filter": 1},
+  {"fieldname": "start_date", "fieldtype": "Date", "label": "Start Date", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "end_date", "fieldtype": "Date", "label": "End Date", "reqd": 1, "in_list_view": 1},
+  {"fieldname": "data", "fieldtype": "Long Text", "label": "Preview Inputs (JSON)", "read_only": 1},
+  {"fieldname": "saved_by", "fieldtype": "Link", "label": "Saved By", "options": "User", "read_only": 1, "in_list_view": 1},
+  {"fieldname": "saved_at", "fieldtype": "Datetime", "label": "Saved At", "read_only": 1, "in_list_view": 1}
+ ],
+ "index_web_pages_for_search": 0,
+ "links": [],
+ "modified": "2026-11-24 11:15:15.000000",
+ "modified_by": "Administrator",
+ "module": "Isoft Angola HR",
+ "name": "Isoft Payroll Draft",
+ "owner": "Administrator",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "write": 1, "role": "HR Manager"},
+  {"create": 1, "delete": 1, "read": 1, "write": 1, "role": "Payroll Officer"},
+  {"create": 1, "delete": 1, "read": 1, "write": 1, "role": "System Manager"}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 0
+}

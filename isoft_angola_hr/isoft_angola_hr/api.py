@@ -1359,6 +1359,67 @@ def payroll_preview(company, start_date, end_date, department=None, branch=None,
 	return out
 
 
+# --------------------------------------------------------------------------- #
+# The preview's draft (HR, November 2026): what HR has typed in the payroll preview —
+# overtime hours, bonuses, advances, holiday and Christmas amounts, who is included —
+# kept on the server per company and period, so closing the ERP no longer loses it.
+# --------------------------------------------------------------------------- #
+def _payroll_draft_name(company, start_date, end_date):
+	return frappe.db.get_value("Isoft Payroll Draft", {
+		"company": company, "start_date": getdate(start_date), "end_date": getdate(end_date)})
+
+
+@frappe.whitelist()
+def get_payroll_draft(company, start_date, end_date):
+	"""The saved preview draft for this company and period, or None."""
+	_guard(perms.PAYROLL_PREVIEW, company)
+	name = _payroll_draft_name(company, start_date, end_date)
+	if not name:
+		return None
+	doc = frappe.get_doc("Isoft Payroll Draft", name)
+	data = json.loads(doc.data or "{}")
+	return {"inputs": data.get("inputs") or {}, "excluded": data.get("excluded") or [],
+	        "filters": data.get("filters") or {}, "saved_by": doc.saved_by,
+	        "saved_by_name": frappe.utils.get_fullname(doc.saved_by), "saved_at": str(doc.saved_at)}
+
+
+@frappe.whitelist(methods=["POST"])
+def save_payroll_draft(company, start_date, end_date, inputs=None, excluded=None, filters=None):
+	"""Save (or replace) the preview draft for this company and period."""
+	_guard(perms.PAYROLL_PREPARE, company)
+	data = {
+		"inputs": _json_arg(inputs, "inputs", default={}) or {},
+		"excluded": [e for e in (_json_arg(excluded, "excluded", default=[]) or []) if e],
+		"filters": _json_arg(filters, "filters", default={}) or {},
+	}
+	name = _payroll_draft_name(company, start_date, end_date)
+	doc = frappe.get_doc("Isoft Payroll Draft", name) if name else frappe.new_doc("Isoft Payroll Draft")
+	doc.update({"company": company, "start_date": getdate(start_date), "end_date": getdate(end_date),
+	            "data": json.dumps(data), "saved_by": frappe.session.user,
+	            "saved_at": frappe.utils.now_datetime()})
+	# authorised above by payroll.prepare + company scope, as the payroll run itself is
+	doc.flags.ignore_permissions = True
+	doc.save()
+	frappe.db.commit()
+	return {"saved_by": doc.saved_by, "saved_by_name": frappe.utils.get_fullname(doc.saved_by),
+	        "saved_at": str(doc.saved_at)}
+
+
+@frappe.whitelist(methods=["POST"])
+def discard_payroll_draft(company, start_date, end_date):
+	"""Throw the preview draft away (HR starts the period over)."""
+	_guard(perms.PAYROLL_PREPARE, company)
+	_clear_payroll_draft(company, start_date, end_date)
+	frappe.db.commit()
+	return True
+
+
+def _clear_payroll_draft(company, start_date, end_date):
+	name = _payroll_draft_name(company, start_date, end_date)
+	if name:
+		frappe.delete_doc("Isoft Payroll Draft", name, ignore_permissions=True, force=True)
+
+
 def _create_christmas_run(company, year, rows, posting_date=None):
 	"""The Christmas bonus run from its preview rows: the bonus period of ``year``, one slip
 	per employee, HR's changed amounts carried with their reason (payroll/christmas.py)."""
@@ -1461,6 +1522,8 @@ def create_payroll_from_preview(company, start_date, end_date, rows, posting_dat
 	entry.number_of_employees = len(entry.employees)
 	entry.insert()
 	entry.create_salary_slips()
+	# the slips now hold what the preview draft held
+	_clear_payroll_draft(company, entry.start_date, entry.end_date)
 	return {"name": entry.name, "employees": entry.number_of_employees,
 	        "total_net_pay": flt(entry.total_net_pay)}
 

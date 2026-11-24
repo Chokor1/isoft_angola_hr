@@ -4522,6 +4522,23 @@ class AngolaHR {
 		if (!f.company) return frappe.msgprint(__("Select a company"));
 		if (f.run_type === "Christmas Bonus") return this.runBonusPreview(inputs);
 		if (!f.start_date || !f.end_date) return frappe.msgprint(__("Select a month"));
+		if (inputs === undefined) {
+			// A fresh Preview: pick up the draft HR saved for this company and period, so
+			// work typed on another day (or another computer) comes back.
+			return this.call("get_payroll_draft", { company: f.company, start_date: f.start_date, end_date: f.end_date })
+				.then((draft) => {
+					this._pvDraft = draft || null;
+					if (draft) {
+						this._excluded = new Set(draft.excluded || []);
+						const fl = draft.filters || {};
+						this.$content.find(".pe-valatt").prop("checked", !!cint(fl.validate_attendance));
+						this.$content.find(".pe-timesheet").prop("checked", !!cint(fl.based_on_timesheet));
+						frappe.show_alert({ message: __("Draft restored (saved {0} by {1})",
+							[frappe.datetime.str_to_user(draft.saved_at), draft.saved_by_name || draft.saved_by]), indicator: "blue" });
+					}
+					this.runPreview(draft ? (draft.inputs || {}) : {});
+				});
+		}
 		frappe.dom.freeze(__("Calculating preview..."));
 		this.call("payroll_preview", { ...f, inputs: JSON.stringify(inputs || {}) })
 			.then((rows) => {
@@ -4612,6 +4629,10 @@ class AngolaHR {
 					` &middot; <span class="text-muted pv-summary">${count} ${__("employees")} &middot; ${__("Total Net")}: ${this.money(total)}</span>`,
 				`<div class="pv-search-wrap"><input type="text" class="form-control input-sm pv-search" placeholder="${__("Search employee, department or designation...")}">
 						<button class="btn btn-default btn-xs pv-cols" style="margin-left:8px;"><i class="fa fa-columns"></i> ${__("Columns")}</button></div>
+					${this._payrollCaps && this._payrollCaps.prepare ? `<div class="pv-draft-bar text-muted small" style="margin:6px 0;">
+						<i class="fa fa-floppy-o"></i> <span class="pv-draft-status">${this._draftStatus()}</span>
+						<button class="btn btn-default btn-xs pv-draft-save" style="margin-left:8px;">${__("Save Draft")}</button>
+						<button class="btn btn-default btn-xs pv-draft-discard" style="margin-left:4px;">${__("Discard Draft")}</button></div>` : ""}
 					<div class="pv-scroll"><table class="ahr-table pv-table"><thead><tr>${header}</tr></thead>
 					<tbody>${body}</tbody></table></div>
 				<br><button class="btn btn-default btn-sm pv-recalc"><i class="fa fa-refresh"></i> ${__("Recalculate")}</button>
@@ -4621,6 +4642,21 @@ class AngolaHR {
 			)
 		);
 		$w.find(".pv-cols").on("click", () => this.columnsDialog());
+		// Draft: every edit is saved a moment later; the namespace keeps one handler however
+		// often the preview re-renders.
+		if (this._payrollCaps && this._payrollCaps.prepare) {
+			$w.off(".pvdraft");
+			$w.on("change.pvdraft input.pvdraft", ".pv-f, .pv-include, .pv-all, .pv-ferias, .pv-natal",
+				() => this.scheduleDraftSave());
+			$w.find(".pv-draft-save").on("click", () => this.savePayrollDraft(true));
+			$w.find(".pv-draft-discard").on("click", () => frappe.confirm(
+				__("Discard the saved draft for this period? The preview goes back to the calculated values."),
+				() => {
+					const f = this.peFilters();
+					this.call("discard_payroll_draft", { company: f.company, start_date: f.start_date, end_date: f.end_date })
+						.then(() => { this._pvDraft = null; this._excluded = new Set(); this.runPreview({}); });
+				}));
+		}
 
 		const refreshSummary = () => {
 			const inc = $w.find(".pv-table tbody tr").filter((_, tr) => $(tr).find(".pv-include").is(":checked"));
@@ -4677,6 +4713,8 @@ class AngolaHR {
 			const rowsToCreate = this.collectPreview().rows;
 			if (!rowsToCreate.length) return frappe.msgprint(__("Select at least one employee to process"));
 			frappe.dom.freeze(__("Creating salary slips..."));
+			clearTimeout(this._draftTimer);  // the server clears the draft once the slips exist
+			this._pvDraft = null;
 			this.call("create_payroll_from_preview", {
 				company: f.company, start_date: f.start_date, end_date: f.end_date,
 				rows: JSON.stringify(rowsToCreate),
@@ -4778,6 +4816,35 @@ class AngolaHR {
 				})
 				.catch(() => frappe.dom.unfreeze());
 		});
+	}
+
+	_draftStatus() {
+		const d = this._pvDraft;
+		return d ? __("Draft saved {0} by {1}", [frappe.datetime.str_to_user(d.saved_at), d.saved_by_name || d.saved_by])
+			: __("Not saved yet — changes are saved automatically");
+	}
+
+	scheduleDraftSave() {
+		clearTimeout(this._draftTimer);
+		this.$content.find(".pv-draft-status").text(__("Saving..."));
+		this._draftTimer = setTimeout(() => this.savePayrollDraft(false), 1500);
+	}
+
+	savePayrollDraft(manual) {
+		clearTimeout(this._draftTimer);
+		const f = this.peFilters();
+		if (!f.company || !f.start_date || !f.end_date || !this.$content.find(".pv-table").length) return;
+		const c = this.collectPreview();
+		return this.call("save_payroll_draft", {
+			company: f.company, start_date: f.start_date, end_date: f.end_date,
+			inputs: JSON.stringify(c.inputs), excluded: JSON.stringify([...this._excluded]),
+			filters: JSON.stringify({ department: f.department, branch: f.branch, designation: f.designation,
+				validate_attendance: f.validate_attendance, based_on_timesheet: f.based_on_timesheet }),
+		}).then((r) => {
+			this._pvDraft = r;
+			this.$content.find(".pv-draft-status").text(this._draftStatus());
+			if (manual) frappe.show_alert({ message: __("Draft saved"), indicator: "green" });
+		}).catch(() => this.$content.find(".pv-draft-status").text(__("Draft NOT saved — check your connection")));
 	}
 
 	_netOf($tr) {
