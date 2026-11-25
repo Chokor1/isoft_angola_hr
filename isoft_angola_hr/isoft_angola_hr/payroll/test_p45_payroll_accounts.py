@@ -343,10 +343,10 @@ class TestReadinessAndChecklist(AccountsFixture):
 		self.unmap("ADT")
 		self.unmap("CTSSE")
 		items = {i["key"]: i for i in pa.finance_checklist(self.company, include_readiness=False)}
-		self.assertFalse(items["advance"]["ok"])
-		self.assertIn("Liability or Asset", items["advance"]["detail"])
-		self.assertIn("Salary advance account is not configured. Please contact Finance.",
-		              items["advance"]["reasons"])
+		# Since November 2026 each employee may carry their own advance account, so an
+		# empty Salary Advance (ADT) mapping is no longer a Finance blocker (test_p59).
+		self.assertTrue(items["advance"]["ok"])
+		self.assertFalse(items["advance"]["reasons"])
 		self.assertFalse(items["employer_inss"]["ok"])
 		self.assertIn("Expense", items["employer_inss"]["detail"])
 		self.assertIn("Employer Social Security expense account is not configured. Please contact Finance.",
@@ -356,15 +356,17 @@ class TestReadinessAndChecklist(AccountsFixture):
 		self.assertTrue(items["employee_inss"]["ok"] and items["payable"]["ok"] and items["bank"]["ok"])
 
 	def test_production_readiness_carries_the_checklist_section(self):
-		self.unmap("ADT")
+		# the employer INSS expense: a mapping that is still required (an empty Salary
+		# Advance mapping no longer is — each employee may carry their own account)
+		self.unmap("CTSSE")
 		report = pr.get_production_readiness(self.company)
 		section = next(s for s in report["sections"] if s["key"] == "finance_checklist")
 		self.assertEqual(section["status"], pr.BLOCKED)
 		by_key = {c["key"]: c for c in section["checks"]}
-		self.assertEqual(by_key["checklist:advance"]["status"], pr.BLOCKED)
-		self.assertEqual(by_key["checklist:advance"]["owner"], pr.FINANCE)
-		self.assertIn("Account per Component", by_key["checklist:advance"]["action"])
-		for key in ("checklist:employee_inss", "checklist:employer_inss", "checklist:payable", "checklist:bank"):
+		self.assertEqual(by_key["checklist:employer_inss"]["status"], pr.BLOCKED)
+		self.assertEqual(by_key["checklist:employer_inss"]["owner"], pr.FINANCE)
+		self.assertIn("Account per Component", by_key["checklist:employer_inss"]["action"])
+		for key in ("checklist:employee_inss", "checklist:advance", "checklist:payable", "checklist:bank"):
 			self.assertEqual(by_key[key]["status"], pr.READY, key)
 		for key in ("checklist:mapping_complete", "checklist:components"):
 			self.assertEqual(by_key[key]["status"], pr.BLOCKED, key)

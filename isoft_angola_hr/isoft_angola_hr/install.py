@@ -154,10 +154,21 @@ CUSTOM_FIELDS = {
 			"description": "Optional. Overrides the default Payroll Payable account on the Journal Entry.",
 		},
 		{
+			# Finance, November 2026: one advance account per employee (363 – Pessoal –
+			# Adiantamentos). Paying an advance debits it; payroll recovery credits it.
+			"fieldname": "custom_salary_advance_account",
+			"label": "Conta de Adiantamentos (Salário)",
+			"fieldtype": "Link",
+			"options": "Account",
+			"insert_after": "custom_payroll_payable_account",
+			"description": "Optional. The employee's own salary-advance account; overrides the "
+			               "Salary Advance (ADT) account in Isoft HR Settings.",
+		},
+		{
 			"fieldname": "custom_iban",
 			"label": "IBAN",
 			"fieldtype": "Data",
-			"insert_after": "custom_payroll_payable_account",
+			"insert_after": "custom_salary_advance_account",
 			"description": "Bank IBAN — used for the payroll bank-transfer export.",
 		},
 		{

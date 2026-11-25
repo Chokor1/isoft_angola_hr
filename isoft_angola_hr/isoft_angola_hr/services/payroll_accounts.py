@@ -157,6 +157,22 @@ def _currency(settings, company):
 		frappe.db.get_value("Company", company, "default_currency") if company else None)
 
 
+#: Components whose Settings account may stay empty because each employee can carry
+#: their own (Employee.custom_salary_advance_account); an empty mapping is then checked
+#: per employee when a payroll is posted, never as a configuration blocker.
+OPTIONAL_MAPPINGS = ("ADT",)
+
+
+def advance_account(employee, mapping):
+	"""The account a salary advance is booked on for this employee: their own advance
+	account (Employee.custom_salary_advance_account — ITEC keeps one per employee under
+	363 – Pessoal – Adiantamentos), else the Salary Advance (ADT) mapping."""
+	own = None
+	if employee and frappe.get_meta("Employee").has_field("custom_salary_advance_account"):
+		own = frappe.db.get_value("Employee", employee, "custom_salary_advance_account")
+	return own or mapping.get("ADT")
+
+
 def components_on(slips):
 	"""The components that will produce accrual lines for these slips, in ledger order."""
 	needed = []
@@ -190,6 +206,19 @@ def accrual_problems(slips, settings=None):
 	out = []
 	for abbr in components_on(slips):
 		req = requirement(abbr)
+		if abbr == "ADT":
+			# per employee: their own advance account, else the ADT mapping
+			seen = set()
+			for slip in slips:
+				if not any((d.get("abbr") or "").strip() == "ADT" and flt(d.get("amount"))
+				           for d in slip.get("deductions") or []):
+					continue
+				account = advance_account(slip.get("employee"), mapping)
+				problem = account_problem(account, req["required_types"], company, currency)
+				if problem and account not in seen:
+					seen.add(account)
+					out.append(dict(req, key="account:" + abbr, account=account, problem=problem))
+			continue
 		problem = account_problem(mapping.get(abbr), req["required_types"], company, currency)
 		if problem:
 			out.append(dict(req, key="account:" + abbr, account=mapping.get(abbr), problem=problem))
@@ -541,6 +570,10 @@ def finance_checklist(company, settings=None, entry=None, period=None, readiness
 
 	def account_item(key, label, abbr):
 		req = requirement(abbr)
+		if abbr in OPTIONAL_MAPPINGS and not mapping.get(abbr):
+			item(key, label, [], WHERE_COMPONENTS)
+			items[-1]["detail"] = _("each employee's own account")
+			return
 		problem = account_problem(mapping.get(abbr), req["required_types"], company, currency)
 		row = dict(req, key="account:" + abbr, account=mapping.get(abbr), problem=problem)
 		item(key, label,
@@ -552,6 +585,8 @@ def finance_checklist(company, settings=None, entry=None, period=None, readiness
 	#    a single READY or BLOCKED.
 	all_problems, all_reasons = [], []
 	for jc in engine.journal_components():
+		if jc["abbr"] in OPTIONAL_MAPPINGS and not mapping.get(jc["abbr"]):
+			continue  # checked per employee when a payroll is posted (accrual_problems)
 		req = requirement(jc["abbr"])
 		problem = account_problem(mapping.get(jc["abbr"]), req["required_types"], company, currency)
 		if problem:
@@ -625,6 +660,8 @@ def finance_checklist(company, settings=None, entry=None, period=None, readiness
 	# 8. every salary component mapped (as distinct from the ones this run uses)
 	comp_problems, comp_reasons = [], []
 	for jc in engine.journal_components():
+		if jc["abbr"] in OPTIONAL_MAPPINGS and not mapping.get(jc["abbr"]):
+			continue  # checked per employee when a payroll is posted (accrual_problems)
 		req = requirement(jc["abbr"])
 		problem = account_problem(mapping.get(jc["abbr"]), req["required_types"], company, currency)
 		if problem:

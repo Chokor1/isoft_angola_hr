@@ -1501,6 +1501,9 @@ class AngolaHR {
 				{ fieldname: "custom_payroll_payable_account", label: __("Payroll Payable Account"), fieldtype: "Link",
 				  options: "Account", get_query: () => ({ filters: { is_group: 0 } }),
 				  description: __("Optional. Overrides the default Payroll Payable account for this employee.") },
+				{ fieldname: "custom_salary_advance_account", label: __("Salary Advance Account"), fieldtype: "Link",
+				  options: "Account", get_query: () => ({ filters: { is_group: 0 } }),
+				  description: __("Optional. The employee's own advance account (e.g. 363…); otherwise the Salary Advance account in Settings.") },
 				{ fieldname: "custom_iban", label: __("IBAN"), fieldtype: "Data",
 				  description: __("Bank IBAN — used for the payroll bank-transfer export.") },
 				{ fieldname: "custom_insurance", label: __("Seguro"), fieldtype: "Data",
@@ -1691,6 +1694,7 @@ class AngolaHR {
 				<div><b>INSS:</b> ${cint(e.custom_foreign_national) ? __("Exempt (foreign national)") : (e.custom_inss_number || "-")}</div>
 				<div><b>${__("Dependents")}:</b> ${e.custom_dependents || 0}</div>
 				<div><b>${__("Payroll Payable Account")}:</b> ${e.custom_payroll_payable_account || "-"}</div>
+				<div><b>${__("Salary Advance Account")}:</b> ${e.custom_salary_advance_account || "-"}</div>
 				<div><b>IBAN:</b> ${e.custom_iban ? frappe.utils.escape_html(e.custom_iban) : "-"}</div>
 				<div><b>${__("Seguro")}:</b> ${e.custom_insurance ? frappe.utils.escape_html(e.custom_insurance) : "-"}</div>
 				<div><b>${__("Default Shift")}:</b> ${e.default_shift ? frappe.utils.escape_html(e.default_shift) : "-"}</div></div>`;
@@ -1766,6 +1770,9 @@ class AngolaHR {
 				{ fieldname: "custom_payroll_payable_account", label: __("Payroll Payable Account"), fieldtype: "Link",
 				  options: "Account", default: e.custom_payroll_payable_account, get_query: () => ({ filters: { is_group: 0 } }),
 				  description: __("Optional. Overrides the default Payroll Payable account for this employee.") },
+				{ fieldname: "custom_salary_advance_account", label: __("Salary Advance Account"), fieldtype: "Link",
+				  options: "Account", default: e.custom_salary_advance_account, get_query: () => ({ filters: { is_group: 0 } }),
+				  description: __("Optional. The employee's own advance account (e.g. 363…); otherwise the Salary Advance account in Settings.") },
 				{ fieldname: "custom_iban", label: __("IBAN"), fieldtype: "Data", default: e.custom_iban,
 				  description: __("Bank IBAN — used for the payroll bank-transfer export.") },
 				{ fieldname: "custom_insurance", label: __("Seguro"), fieldtype: "Data", default: e.custom_insurance,

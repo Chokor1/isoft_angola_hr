@@ -175,11 +175,13 @@ class TestMissingAccountBlocksPosting(ReadinessFixture):
 		self.assertEqual(gate["status"], "BLOCKED")
 		self.assertEqual(gate["headline"], CANNOT_PROCEED)
 		self.assertIn(EMPLOYER_INSS_MISSING, gate["reasons"])
-		self.assertIn(ADVANCE_MISSING, gate["reasons"])
+		# an empty Salary Advance mapping is not a blocker since November 2026: each
+		# employee may carry their own advance account (test_p59)
+		self.assertNotIn(ADVANCE_MISSING, gate["reasons"])
 		self.assertEqual([i["key"] for i in gate["items"]], list(pa.CHECKLIST_ORDER))
 		blocked = set(gate["blocked_items"])
-		self.assertTrue({"mapping_complete", "employer_inss", "advance", "components"} <= blocked, blocked)
-		self.assertTrue({"employee_inss", "payable", "bank"}.isdisjoint(blocked))
+		self.assertTrue({"mapping_complete", "employer_inss", "components"} <= blocked, blocked)
+		self.assertTrue({"employee_inss", "advance", "payable", "bank"}.isdisjoint(blocked))
 
 
 # --------------------------------------------------------------------------- #

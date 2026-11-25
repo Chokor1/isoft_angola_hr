@@ -176,9 +176,12 @@ def _advance_account(advance, settings):
 	which is the same asset the payroll recovery credits, so the two sides always meet."""
 	if advance.advance_account:
 		return advance.advance_account
-	for row in settings.get("component_accounts") or []:
-		if row.abbr == "ADT" and row.account:
-			return row.account
+	from isoft_angola_hr.isoft_angola_hr.services import payroll_accounts
+	account = payroll_accounts.advance_account(
+		advance.get("employee"),
+		{r.abbr: r.account for r in settings.get("component_accounts") or [] if r.account})
+	if account:
+		return account
 	frappe.throw(
 		_("No Employee Advance account is configured. Set one on the advance, or map the "
 		  "Adiantamento component in Isoft HR Settings → Account per Component."),

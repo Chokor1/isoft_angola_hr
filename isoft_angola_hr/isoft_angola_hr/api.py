@@ -352,7 +352,8 @@ def get_employee(name):
 		"Employee", name,
 		["name", "employee_name", "designation", "department", "company", "date_of_joining",
 		 "custom_nif", "custom_inss_number", "custom_foreign_national", "custom_dependents",
-		 "custom_payroll_payable_account", "custom_iban", "custom_insurance", "default_shift",
+		 "custom_payroll_payable_account", "custom_salary_advance_account", "custom_iban",
+		 "custom_insurance", "default_shift",
 		 "cell_number", "personal_email"],
 		as_dict=True,
 	)
@@ -1738,6 +1739,9 @@ def make_journal_entry(salary_slip):
 
 	def line(abbr, label, amount, side):
 		account = comp_acc.get(abbr)
+		if abbr == "ADT":
+			# the employee's own advance account first (Finance, November 2026)
+			account = payroll_accounts.advance_account(slip.employee, comp_acc)
 		if not account:
 			missing.append(label)
 			return
@@ -3468,6 +3472,7 @@ def create_employee(data):
 		"custom_foreign_national": cint(d.get("custom_foreign_national")),
 		"custom_dependents": cint(d.get("custom_dependents")),
 		"custom_payroll_payable_account": d.get("custom_payroll_payable_account") or None,
+		"custom_salary_advance_account": d.get("custom_salary_advance_account") or None,
 		"custom_iban": d.get("custom_iban") or None,
 		"custom_insurance": d.get("custom_insurance") or None,
 		"default_shift": d.get("default_shift") or None,
@@ -3494,6 +3499,8 @@ def update_employee(name, data):
 		emp.custom_foreign_national = cint(d.get("custom_foreign_national"))
 	if "custom_payroll_payable_account" in d:
 		emp.custom_payroll_payable_account = d.get("custom_payroll_payable_account") or None
+	if "custom_salary_advance_account" in d:
+		emp.custom_salary_advance_account = d.get("custom_salary_advance_account") or None
 	emp.save()
 	frappe.db.commit()
 	return {"name": emp.name, "employee_name": emp.employee_name}

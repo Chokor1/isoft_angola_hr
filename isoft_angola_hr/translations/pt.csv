@@ -3057,3 +3057,7 @@
 "Draft restored (saved {0} by {1})","Rascunho recuperado (guardado {0} por {1})"
 "Discard the saved draft for this period? The preview goes back to the calculated values.","Descartar o rascunho guardado deste período? A pré-visualização volta aos valores calculados."
 "Isoft Payroll Draft","Rascunho de Processamento Salarial"
+"Salary Advance Account","Conta de Adiantamentos"
+"Optional. The employee's own advance account (e.g. 363…); otherwise the Salary Advance account in Settings.","Opcional. A conta de adiantamentos do funcionário (ex.: 363…); caso contrário, a conta de Adiantamento das Definições."
+"Optional. The employee's own salary-advance account; overrides the Salary Advance (ADT) account in Isoft HR Settings.","Opcional. A conta de adiantamentos do próprio funcionário; substitui a conta de Adiantamento (ADT) das Definições de RH."
+"each employee's own account","a conta de cada funcionário"
