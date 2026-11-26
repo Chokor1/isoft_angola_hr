@@ -64,7 +64,7 @@ def reconcile(entry):
 
 	settings = frappe.get_cached_doc("Isoft HR Settings")
 	accounts = _account_map(settings)
-	payable = settings.get("payroll_payable_account")
+	payables = _payable_accounts(live, settings)
 
 	lines = []
 
@@ -76,7 +76,7 @@ def reconcile(entry):
 		})
 
 	line("net_payable", _("Net payroll vs Payroll Payable credited"),
-	     totals["net"], _gl_balance(accrual_vouchers, payable, "credit"),
+	     totals["net"], sum(_gl_balance(accrual_vouchers, a, "credit") for a in payables),
 	     _("Every net salary must appear as a credit to the payable account."))
 
 	line("employee_inss", _("Employee INSS vs INSS liability"),
@@ -92,7 +92,7 @@ def reconcile(entry):
 	     totals["irt"], _gl_balance(accrual_vouchers, accounts.get("IRT"), "credit"))
 
 	line("payment", _("Net payroll vs Payroll Payable settled"),
-	     totals["net"], _gl_balance(payment_vouchers, payable, "debit"),
+	     totals["net"], sum(_gl_balance(payment_vouchers, a, "debit") for a in payables),
 	     _("Payment must clear exactly the payable the accrual booked."))
 
 	# The accrual must balance in its own right.
@@ -133,6 +133,18 @@ def reconcile(entry):
 		"payment_vouchers": payment_vouchers,
 		"mapping_drift": drift,
 	}
+
+
+def _payable_accounts(rows, settings):
+	"""Every account the run's net pay is booked on: each employee's own payroll payable
+	account (ITEC's personal 361 accounts), else the Settings one."""
+	default = settings.get("payroll_payable_account")
+	own = {}
+	employees = [r["employee"] for r in rows if r.get("employee")]
+	if employees and frappe.get_meta("Employee").has_field("custom_payroll_payable_account"):
+		own = dict(frappe.get_all("Employee", filters={"name": ("in", employees)},
+		                          fields=["name", "custom_payroll_payable_account"], as_list=True))
+	return sorted({own.get(r.get("employee")) or default for r in rows} - {None, ""})
 
 
 def _submitted(journal_entry):

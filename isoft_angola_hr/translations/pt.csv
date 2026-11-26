@@ -3061,3 +3061,5 @@
 "Optional. The employee's own advance account (e.g. 363…); otherwise the Salary Advance account in Settings.","Opcional. A conta de adiantamentos do funcionário (ex.: 363…); caso contrário, a conta de Adiantamento das Definições."
 "Optional. The employee's own salary-advance account; overrides the Salary Advance (ADT) account in Isoft HR Settings.","Opcional. A conta de adiantamentos do próprio funcionário; substitui a conta de Adiantamento (ADT) das Definições de RH."
 "each employee's own account","a conta de cada funcionário"
+"Salary slips posted","Recibos lançados"
+"Payroll: {0} ({1} employee(s))","Processamento salarial: {0} ({1} funcionário(s))"

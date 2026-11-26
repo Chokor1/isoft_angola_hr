@@ -1718,69 +1718,95 @@ def make_journal_entry(salary_slip):
 		return existing
 	# F-04: every account this slip's lines need must be usable BEFORE a voucher exists.
 	payroll_accounts.assert_postable([slip])
+	_assert_net_not_negative(slip)
+	return _post_payroll_accrual([slip], remark=_("Payroll: {0}").format(slip.name))
+
+
+def _assert_net_not_negative(slip):
 	if flt(slip.net_pay) < 0:
 		frappe.throw(
 			_("Net pay for {0} is negative ({1}). Correct the slip before posting it.").format(
 				frappe.bold(slip.employee_name or slip.employee), flt(slip.net_pay))
 		)
 
+
+def _post_payroll_accrual(slips, remark=None):
+	"""ONE submitted Journal Entry booking the accrual of every slip given.
+
+	Finance (November 2026): a payroll is one movement across several accounts, with the
+	totals on the tax and expense accounts — not one voucher per employee, which put 80
+	lines a month on 3491 INSS alone. Lines are therefore summed per account (and cost
+	centre); only accounts that belong to one employee — their personal payable (361) or
+	advance (363) account, or a Payable account carrying the employee as party — keep a
+	line per employee. Every slip's ``journal_entry`` points at the same voucher, so
+	cancelling it un-posts them all (unlink_cancelled_payroll_entry).
+	"""
 	s = frappe.get_single("Isoft HR Settings")
-	payable_account = _payable_account(slip, s)
 	comp_acc = {r.abbr: r.account for r in s.component_accounts if r.account}
-	cost_center = _payroll_cost_center(slip)
+	first = slips[0]
+	debits, credits, missing = {}, {}, []
 
-	je = frappe.new_doc("Journal Entry")
-	je.voucher_type = "Journal Entry"
-	je.company = slip.company
-	je.posting_date = slip.posting_date or slip.end_date
-	je.user_remark = _("Payroll: {0}").format(slip.name)
-
-	missing = []
-
-	def line(abbr, label, amount, side):
-		account = comp_acc.get(abbr)
-		if abbr == "ADT":
-			# the employee's own advance account first (Finance, November 2026)
-			account = payroll_accounts.advance_account(slip.employee, comp_acc)
-		if not account:
-			missing.append(label)
+	def add(account, side, amount, cost_center, employee):
+		if not flt(amount):
 			return
-		je.append("accounts", {
-			"account": account, "cost_center": cost_center,
-			side: flt(amount), **_party_fields(account, slip.employee),
-		})
+		party = _party_fields(account, employee)
+		key = (account, cost_center, party.get("party_type"), party.get("party"))
+		bucket = debits if side == "debit_in_account_currency" else credits
+		bucket[key] = bucket.get(key, 0.0) + flt(amount)
 
-	# Earnings -> debit each component's expense account.
-	for e in slip.earnings:
-		if e.do_not_include_in_total or not flt(e.amount):
-			continue
-		line(e.abbr, e.salary_component, e.amount, "debit_in_account_currency")
-	# Deductions -> credit each component's liability account.
-	for d in slip.deductions:
-		if not flt(d.amount):
-			continue
-		line(d.abbr, d.salary_component, d.amount, "credit_in_account_currency")
+	for slip in slips:
+		cost_center = _payroll_cost_center(slip)
 
-	# Employer social security: an employer cost, booked expense/liability. It is not
-	# part of gross and never touches net pay. Slips calculated before employer
-	# contributions existed carry 0 and post nothing.
-	employer_ss = flt(slip.get("ss_employer_amount"))
-	if employer_ss:
-		line("CTSSE", engine.COMPONENTS["CTSSE"]["name"], employer_ss, "debit_in_account_currency")
-		line("CTSSP", engine.COMPONENTS["CTSSP"]["name"], employer_ss, "credit_in_account_currency")
+		def line(abbr, label, amount, side):
+			account = comp_acc.get(abbr)
+			if abbr == "ADT":
+				# the employee's own advance account first (Finance, November 2026)
+				account = payroll_accounts.advance_account(slip.employee, comp_acc)
+			if not account:
+				missing.append(label)
+				return
+			add(account, side, amount, cost_center, slip.employee)
 
-	# Net pay -> credit Payroll Payable.
-	je.append("accounts", {
-		"account": payable_account, "cost_center": cost_center,
-		"credit_in_account_currency": flt(slip.net_pay),
-		**_party_fields(payable_account, slip.employee),
-	})
+		# Earnings -> debit each component's expense account.
+		for e in slip.earnings:
+			if e.do_not_include_in_total or not flt(e.amount):
+				continue
+			line(e.abbr, e.salary_component, e.amount, "debit_in_account_currency")
+		# Deductions -> credit each component's liability account.
+		for d in slip.deductions:
+			if not flt(d.amount):
+				continue
+			line(d.abbr, d.salary_component, d.amount, "credit_in_account_currency")
+
+		# Employer social security: an employer cost, booked expense/liability. It is not
+		# part of gross and never touches net pay. Slips calculated before employer
+		# contributions existed carry 0 and post nothing.
+		employer_ss = flt(slip.get("ss_employer_amount"))
+		if employer_ss:
+			line("CTSSE", engine.COMPONENTS["CTSSE"]["name"], employer_ss, "debit_in_account_currency")
+			line("CTSSP", engine.COMPONENTS["CTSSP"]["name"], employer_ss, "credit_in_account_currency")
+
+		# Net pay -> credit Payroll Payable (the employee's own account, else Settings).
+		add(_payable_account(slip, s), "credit_in_account_currency", slip.net_pay, cost_center,
+		    slip.employee)
 
 	if missing:
 		frappe.throw(
 			_("No account is configured for these payroll components: {0}. "
 			  "Set them under Settings -> Account per Component.").format(", ".join(sorted(set(missing))))
 		)
+
+	je = frappe.new_doc("Journal Entry")
+	je.voucher_type = "Journal Entry"
+	je.company = first.company
+	je.posting_date = first.posting_date or first.end_date
+	je.user_remark = remark or _("Payroll: {0}").format(first.payroll_entry or first.name)
+	for bucket, side in ((debits, "debit_in_account_currency"), (credits, "credit_in_account_currency")):
+		for (account, cost_center, party_type, party), amount in bucket.items():
+			row = {"account": account, "cost_center": cost_center, side: flt(amount, 2)}
+			if party_type:
+				row.update(party_type=party_type, party=party)
+			je.append("accounts", row)
 
 	# Posted by the application on behalf of an already-authorised action, not by the user
 	# browsing to Journal Entry. The capability layer decided this above
@@ -1793,7 +1819,8 @@ def make_journal_entry(salary_slip):
 	je.flags.ignore_permissions = True
 	je.insert()
 	je.submit()
-	slip.db_set("journal_entry", je.name)
+	for slip in slips:
+		slip.db_set("journal_entry", je.name)
 	return je.name
 
 
@@ -1956,12 +1983,25 @@ def make_bulk_journal_entry(name, employees=None):
 	# Journal Entry is written. Previously a missing account surfaced on the first
 	# employee that used it, after the employees before them had already been booked.
 	payroll_accounts.assert_postable(pending)
+	# Every postable slip goes into ONE accrual entry (Finance, November 2026); a slip that
+	# cannot be posted is reported and left out rather than holding up everybody else.
+	postable = []
 	for slip in pending:
 		try:
-			make_journal_entry(slip.name)
-			created += 1
+			_assert_posting_authorized(slip)
+			if _existing_entry(slip.name, "journal_entry"):  # row lock: no double posting
+				skipped += 1
+				continue
+			_assert_net_not_negative(slip)
+			postable.append(slip)
 		except Exception as e:
-			errors.append(f"{slip.employee_name}: {str(e)}")
+			frappe.clear_last_message()
+			errors.append(f"{slip.employee_name}: {frappe.utils.strip_html(str(e))}")
+	journal_entry = None
+	if postable:
+		journal_entry = _post_payroll_accrual(
+			postable, remark=_("Payroll: {0} ({1} employee(s))").format(entry.name, len(postable)))
+		created = len(postable)
 
 	# A run that produced nothing but errors must fail loudly. Returning "created: 0"
 	# with the reasons buried in a list is how a payroll silently does not get posted.
@@ -1973,7 +2013,45 @@ def make_bulk_journal_entry(name, employees=None):
 	if wf.state_of(entry) == wf.APPROVED and not errors and _all_slips_posted(entry):
 		wf.perform(entry, wf.POST)
 	return {"created": created, "skipped": skipped, "errors": errors,
-	        "status": wf.state_of(entry)}
+	        "status": wf.state_of(entry), "journal_entry": journal_entry}
+
+
+def merge_accrual_entries(name):
+	"""One-off correction for a run posted before the single accrual entry (November 2026):
+	cancel its per-employee accrual Journal Entries and book the same slips again as ONE
+	entry. Run by an administrator from the console, with Finance's agreement::
+
+	    from isoft_angola_hr.isoft_angola_hr.api import merge_accrual_entries
+	    merge_accrual_entries("IPE-03034"); frappe.db.commit()
+
+	Refused once any slip of the run has been paid: the payment clears the payables the
+	old entries booked, so those must be cancelled first. The run's workflow state is not
+	touched — the same amounts are on the same accounts, only in one voucher.
+	"""
+	entry = frappe.get_doc("Isoft Payroll Entry", name)
+	slips = [frappe.get_doc("Isoft Salary Slip", r.salary_slip) for r in entry.employees
+	         if r.salary_slip]
+	slips = [s for s in slips if s.docstatus == 1]
+	paid = [s.name for s in slips if s.payment_entry
+	        and cint(frappe.db.get_value("Journal Entry", s.payment_entry, "docstatus")) == 1]
+	if paid:
+		frappe.throw(_("Payroll {0} already has salary payments ({1} slip(s)); cancel the payment "
+		               "first.").format(entry.name, len(paid)))
+	old = sorted({s.journal_entry for s in slips if s.journal_entry
+	              and cint(frappe.db.get_value("Journal Entry", s.journal_entry, "docstatus")) == 1})
+	if len(old) <= 1:
+		return {"cancelled": [], "journal_entry": old[0] if old else None}
+	for je_name in old:
+		je = frappe.get_doc("Journal Entry", je_name)
+		je.flags.ignore_permissions = True
+		je.cancel()  # unlink_cancelled_payroll_entry clears the slips' journal_entry
+	for s in slips:
+		s.reload()
+		_assert_net_not_negative(s)
+	payroll_accounts.assert_postable(slips)
+	new = _post_payroll_accrual(
+		slips, remark=_("Payroll: {0} ({1} employee(s))").format(entry.name, len(slips)))
+	return {"cancelled": old, "journal_entry": new}
 
 
 def _all_slips_posted(entry):

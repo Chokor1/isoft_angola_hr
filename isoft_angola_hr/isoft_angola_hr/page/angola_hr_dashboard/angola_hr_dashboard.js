@@ -4961,7 +4961,8 @@ class AngolaHR {
 				<p>${__("{0} salary slip(s) already carry a submitted voucher, so nothing was created a second time.", [skipped])}</p>`);
 		} else {
 			lines.push(`<div class="ahr-form-grid">
-				<div><b>${__("Vouchers created")}:</b> ${created}</div>
+				<div><b>${__("Salary slips posted")}:</b> ${created}</div>
+				${res.journal_entry ? `<div><b>${__("Journal Entry")}:</b> <a href="/app/journal-entry/${encodeURIComponent(res.journal_entry)}">${frappe.utils.escape_html(res.journal_entry)}</a></div>` : ""}
 				<div><b>${__("Already posted")}:</b> ${skipped}</div>
 				${res.total ? `<div><b>${__("Amount")}:</b> ${this.money(res.total)}</div>` : ""}
 				<div><b>${__("Payroll")}:</b> ${frappe.utils.escape_html(res.status || "")}</div>
