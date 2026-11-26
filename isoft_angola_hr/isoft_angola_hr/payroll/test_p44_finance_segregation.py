@@ -240,7 +240,7 @@ class TestHRManager(SegregationFixture):
 		self.assertFalse(offered & {wf.POST, wf.RELEASE_FOR_PAYMENT, wf.PAY, wf.CLOSE}, offered)
 		flags = frappe.get_doc("Isoft Payroll Entry", entry.name).approval_summary()["finance"]
 		self.assertEqual(flags, {"can_post": False, "can_submit_slips": False, "can_pay": False,
-		                         "can_export_bank": False})
+		                         "can_export_bank": False, "can_remove_from_payment": False})
 		caps = api.payroll_capabilities()
 		self.assertTrue(caps["prepare"] and caps["calculate"] and caps["submit_for_approval"])
 		self.assertFalse(caps["post"] or caps["export_bank"] or caps["confirm_payment"])

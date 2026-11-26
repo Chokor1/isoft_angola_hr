@@ -1745,10 +1745,19 @@ def _post_payroll_accrual(slips, remark=None):
 	comp_acc = {r.abbr: r.account for r in s.component_accounts if r.account}
 	first = slips[0]
 	debits, credits, missing = {}, {}, []
+	company_cc = frappe.db.get_value("Company", first.company, "cost_center")
+	report_type = {}
 
 	def add(account, side, amount, cost_center, employee):
 		if not flt(amount):
 			return
+		# Cost centres split the cost (72xx) by department; on a balance-sheet account
+		# (INSS, IRT, payables) they mean nothing and would split the total Finance wants
+		# on one line.
+		if account not in report_type:
+			report_type[account] = frappe.db.get_value("Account", account, "report_type")
+		if report_type[account] == "Balance Sheet" and company_cc:
+			cost_center = company_cc
 		party = _party_fields(account, employee)
 		key = (account, cost_center, party.get("party_type"), party.get("party"))
 		bucket = debits if side == "debit_in_account_currency" else credits
@@ -2111,6 +2120,72 @@ def make_bulk_payment_entry(name, payment_account=None, posting_date=None, emplo
 	        "status": status, "journal_entry": journal_entry}
 
 
+@frappe.whitelist(methods=["POST"])
+def remove_from_payment(name, employees):
+	"""Take employees off the payment entry that paid them, so they can be paid from
+	another bank (Finance, November 2026).
+
+	A submitted Journal Entry cannot be edited, so the payment entry is cancelled and the
+	other employees on it are paid again in ONE new entry with the same bank account, date
+	and bank reference. The employees removed are unpaid and can be paid with Make
+	Payment from any account; a Paid run goes back to Payment Ready until they are.
+	"""
+	_guard(perms.PAYROLL_CONFIRM_PAYMENT)
+	entry = frappe.get_doc("Isoft Payroll Entry", name)
+	wf.assert_can_pay(entry)
+	sel = set(_json_arg(employees, "employees", default=[]) or [])
+	slips = [frappe.get_doc("Isoft Salary Slip", r.salary_slip) for r in entry.employees
+	         if r.salary_slip and r.employee in sel]
+	by_entry = {}
+	for slip in slips:
+		if slip.docstatus == 1 and slip.payment_entry and cint(
+				frappe.db.get_value("Journal Entry", slip.payment_entry, "docstatus")) == 1:
+			by_entry.setdefault(slip.payment_entry, set()).add(slip.name)
+	if not by_entry:
+		frappe.throw(_("None of the selected employees has been paid."), title=_("Nothing to Remove"))
+
+	cancelled, reissued, removed = [], [], 0
+	for je_name, gone in by_entry.items():
+		old = frappe.get_doc("Journal Entry", je_name)
+		bank = next((a.account for a in old.accounts if flt(a.credit_in_account_currency)), None)
+		others = [frappe.get_doc("Isoft Salary Slip", n) for n in frappe.get_all(
+			"Isoft Salary Slip", filters={"payment_entry": je_name, "docstatus": 1}, pluck="name")
+			if n not in gone]
+		old.flags.ignore_permissions = True
+		old.cancel()  # unlink_cancelled_payroll_entry un-pays every slip on it
+		cancelled.append(je_name)
+		removed += len(gone)
+		if others:
+			reissued.append(_post_salary_payment(
+				others, payment_account=bank, posting_date=old.posting_date,
+				bank_reference=old.cheque_no,
+				remark=_("Salary payment: payroll {0} ({1} employee(s))").format(entry.name, len(others))))
+
+	entry.reload()
+	wf.reopen_payment(entry)
+	entry.add_comment("Info", _("{0} employee(s) removed from payment {1}; re-issued as {2}.").format(
+		removed, ", ".join(cancelled), ", ".join(reissued) or "—"))
+	return {"removed": removed, "cancelled": cancelled, "journal_entries": reissued,
+	        "status": wf.state_of(entry)}
+
+
+def _employee_banks(employees):
+	"""Each employee's bank, for paying a run bank by bank: the Employee's Bank Name, else
+	the bank code in their IBAN (AO06 + 4-digit bank code)."""
+	if not employees:
+		return {}
+	meta = frappe.get_meta("Employee")
+	fields = ["name"] + [f for f in ("bank_name", "custom_iban") if meta.has_field(f)]
+	out = {}
+	for r in frappe.get_all("Employee", filters={"name": ("in", list(employees))}, fields=fields):
+		bank = (r.get("bank_name") or "").strip().upper()
+		if not bank:
+			iban = (r.get("custom_iban") or "").replace(" ", "").upper()
+			bank = _("IBAN {0}").format(iban[4:8]) if iban.startswith("AO") and len(iban) >= 8 else ""
+		out[r.name] = bank
+	return out
+
+
 @frappe.whitelist()
 def get_payroll_entry(name):
 	_guard(perms.PAYROLL_READ)
@@ -2123,6 +2198,7 @@ def get_payroll_entry(name):
 		for s in frappe.get_all("Isoft Salary Slip", filters={"name": ["in", slip_names]},
 		                        fields=["name", "docstatus", "journal_entry", "payment_entry"]):
 			status[s.name] = s
+	banks = _employee_banks({e.employee for e in doc.employees if e.employee})
 	return {
 		"doc": {f: doc.get(f) for f in ["name", "company", "start_date", "end_date", "posting_date",
 		                                "number_of_employees", "total_net_pay", "salary_slips_created",
@@ -2136,6 +2212,7 @@ def get_payroll_entry(name):
 		"employees": [{
 			"employee": e.employee, "employee_name": e.employee_name,
 			"salary_slip": e.salary_slip, "net_pay": flt(e.net_pay),
+			"bank": banks.get(e.employee) or "",
 			"docstatus": (status.get(e.salary_slip) or {}).get("docstatus"),
 			"journal_entry": (status.get(e.salary_slip) or {}).get("journal_entry"),
 			"payment_entry": (status.get(e.salary_slip) or {}).get("payment_entry"),

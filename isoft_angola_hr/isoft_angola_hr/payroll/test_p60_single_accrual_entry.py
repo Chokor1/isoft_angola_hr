@@ -163,3 +163,18 @@ class TestOneAccrualEntryPerRun(ControlFixture):
 		frappe.set_user("Administrator")
 		with self.assertRaises(frappe.ValidationError):
 			api.merge_accrual_entries(entry.name)
+
+	def test_tax_accounts_stay_one_line_across_cost_centres(self):
+		company_cc = frappe.db.get_value("Company", self.company, "cost_center")
+		other = frappe.get_all("Cost Center", filters={"company": self.company, "is_group": 0,
+		                                               "name": ("!=", company_cc)}, pluck="name", limit=1)
+		if not other:
+			self.skipTest("the company has a single cost centre")
+		frappe.db.set_value("Employee", self.second.name, "payroll_cost_center", other[0])
+		self.addCleanup(frappe.db.set_value, "Employee", self.second.name, "payroll_cost_center", None)
+		entry, res = self.posted_entry()
+		je = frappe.get_doc("Journal Entry", res["journal_entry"])
+		for account in (self.acc["CTSS3"], self.acc["CTSSP"], self.payable):
+			self.assertEqual(len(self.lines(je, account)), 1, account)
+		# the cost itself is still split by cost centre
+		self.assertEqual({a.cost_center for a in self.lines(je, self.acc["SB"])}, {company_cc, other[0]})

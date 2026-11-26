@@ -5324,17 +5324,31 @@ class AngolaHR {
 				v ? `<a href="/app/journal-entry/${encodeURIComponent(v)}" target="_blank" title="${esc(v)}">✓</a>`
 				  : `<span class="text-muted">—</span>`;
 			const rowsHtml = r.employees
-				.map((e) => `<tr data-emp="${esc(e.employee)}" data-slip="${esc(e.salary_slip || "")}">
+				.map((e) => `<tr data-emp="${esc(e.employee)}" data-slip="${esc(e.salary_slip || "")}" data-bank="${esc(e.bank || "")}">
 					<td class="pv-c"><input type="checkbox" class="pe-sel" ${e.docstatus === 1 ? "checked" : "disabled"}></td>
 					<td>${esc(e.employee_name || "")}</td>
+					<td>${esc(e.bank || "—")}</td>
 					<td class="num">${this.money(e.net_pay)}</td>
 					<td class="num">${stat(e.journal_entry)}</td>
 					<td class="num">${stat(e.payment_entry)}</td>
 						<td>${this.slipStatus(e.status)}</td></tr>`)
 				.join("");
-			const emp = `<table class="ahr-table"><thead><tr>
+			// Employees paid from different banks: tick one bank's employees at a time and
+			// pay them from that bank's account (Finance, November 2026).
+			const bankCount = {};
+			(r.employees || []).filter((e) => e.docstatus === 1)
+				.forEach((e) => { const b = e.bank || ""; bankCount[b] = (bankCount[b] || 0) + 1; });
+			const bankNames = Object.keys(bankCount).sort();
+			const bankPicker = bankNames.length > 1
+				? `<div style="margin-bottom:8px"><label class="small" style="margin-right:6px">${__("Select by bank")}:</label>
+					<select class="form-control input-xs pe-bank-pick" style="display:inline-block;width:auto">
+						<option value="__all">${__("All")}</option>
+						${bankNames.map((b) => `<option value="${esc(b)}">${esc(b || __("No bank"))} (${bankCount[b]})</option>`).join("")}
+					</select></div>`
+				: "";
+			const emp = bankPicker + `<table class="ahr-table"><thead><tr>
 				<th class="pv-c"><input type="checkbox" class="pe-all" checked></th>
-				<th>${__("Employee")}</th><th class="num">${__("Net Pay")}</th>
+				<th>${__("Employee")}</th><th>${__("Bank")}</th><th class="num">${__("Net Pay")}</th>
 				<th class="num">${__("Accrual JE")}</th><th class="num">${__("Payment")}</th>
 				<th>${__("Status")}</th></tr></thead>
 				<tbody>${rowsHtml}</tbody></table>`;
@@ -5457,6 +5471,7 @@ class AngolaHR {
 						${canPost ? `<button class="btn btn-xs btn-primary pe-bulk-je">${__("Post Accounting")}</button>` : ""}
 						${btn("release_for_payment", __("Release for Payment"), "btn-primary")}
 						${canPay ? `<button class="btn btn-xs btn-primary pe-bulk-pe">${__("Make Payment")}</button>` : ""}
+						${fin.can_remove_from_payment && (r.employees || []).some((e) => e.payment_entry) ? `<button class="btn btn-xs btn-default pe-unpay">${__("Remove from Payment")}</button>` : ""}
 						${canExport ? `<button class="btn btn-xs btn-default pe-bank"><i class="fa fa-file-excel-o"></i> ${__("Export Bank File")}</button>` : ""}
 						${btn("close", __("Close Payroll"), "btn-default")}
 						${btn("cancel", __("Cancel Payroll"), "btn-danger")}
@@ -5502,6 +5517,44 @@ class AngolaHR {
 			$(d.body).find(".pe-all").on("change", (e) => {
 				$(d.body).find(".pe-sel").not(":disabled").prop("checked", e.currentTarget.checked);
 			});
+			$(d.body).find(".pe-bank-pick").on("change", (e) => {
+				const bank = e.currentTarget.value;
+				$(d.body).find(".pe-sel").not(":disabled").each((_, c) => {
+					$(c).prop("checked", bank === "__all" || String($(c).closest("tr").data("bank") || "") === bank);
+				});
+			});
+			const paidBy = {};
+			(r.employees || []).forEach((x) => { if (x.payment_entry) paidBy[x.employee] = x; });
+			$(d.body).find(".pe-unpay").on("click", () => {
+				const emps = selectedEmps().filter((x) => paidBy[x]);
+				if (!emps.length) return frappe.msgprint(__("Tick the paid employees to remove from their payment."));
+				const names = emps.map((x) => esc(paidBy[x].employee_name || x));
+				const entries = [...new Set(emps.map((x) => paidBy[x].payment_entry))];
+				frappe.confirm(
+					`<p>${__("Remove {0} employee(s) from payment {1}?", [emps.length, entries.map(esc).join(", ")])}</p>
+					<p class="small">${names.slice(0, 15).join(", ")}${names.length > 15 ? "…" : ""}</p>
+					<div class="ahr-callout warn">${__("The payment entry is cancelled and re-issued for the other employees, with the same bank, date and reference. The employees removed can then be paid from another bank with Make Payment.")}</div>`,
+					() => {
+						frappe.dom.freeze(__("Updating payment…"));
+						this.action("remove_from_payment", { name, employees: JSON.stringify(emps) })
+							.then((res) => {
+								frappe.dom.unfreeze();
+								frappe.msgprint({
+									title: __("Removed from payment"), indicator: "green",
+									message: `<div class="ahr-form-grid">
+										<div><b>${__("Employees removed")}:</b> ${res.removed}</div>
+										<div><b>${__("Cancelled")}:</b> ${(res.cancelled || []).map(esc).join(", ")}</div>
+										<div><b>${__("New payment entry")}:</b> ${(res.journal_entries || []).map(esc).join(", ") || "—"}</div>
+										<div><b>${__("Payroll")}:</b> ${esc(res.status || "")}</div></div>`,
+								});
+								reopen();
+							})
+							.catch((err) => {
+								frappe.dom.unfreeze();
+								this.fail(__("Could not remove from payment"), err);
+							});
+					});
+			});
 			$(d.body).find(".pe-submit-slips").on("click", () => {
 				this.call("submit_payroll_entry", { name }).then((res) => {
 					frappe.show_alert({ message: __("Submitted {0} slips", [res.submitted]), indicator: "green" });
@@ -5536,8 +5589,8 @@ class AngolaHR {
 				});
 			});
 			$(d.body).find(".pe-bulk-pe").on("click", () => {
-				const emps = selectedEmps();
-				if (!emps.length) return frappe.msgprint(__("Select at least one employee"));
+				const emps = selectedEmps().filter((x) => !paidBy[x]);
+				if (!emps.length) return frappe.msgprint(__("Tick at least one employee who has not been paid yet."));
 				const net = (r.employees || [])
 					.filter((x) => emps.indexOf(x.employee) > -1)
 					.reduce((a, x) => a + flt(x.net_pay), 0);

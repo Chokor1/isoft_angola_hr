@@ -785,6 +785,10 @@ def finance_flags(entry, user=None):
 		"can_post": state in (APPROVED, POSTED) and ok(perms.PAYROLL_POST, POST),
 		"can_submit_slips": state in (APPROVED, POSTED, PAYMENT_READY) and ok(perms.PAYROLL_POST, POST),
 		"can_pay": state == PAYMENT_READY and ok(perms.PAYROLL_CONFIRM_PAYMENT, PAY),
+		# taking an employee off a payment (to pay them from another bank) is needed most
+		# once the run is Paid — api.remove_from_payment
+		"can_remove_from_payment": state in (PAYMENT_READY, PAID)
+		and ok(perms.PAYROLL_CONFIRM_PAYMENT, PAY),
 		"can_export_bank": can_export(entry, user=user),
 	}
 
@@ -815,6 +819,20 @@ def assert_can_pay(entry):
 			_("A payroll in state {0} cannot be paid. Approve and post the payroll "
 			  "first.").format(_(state)), title=_("Payment Not Authorised"))
 	return True
+
+
+def reopen_payment(entry, save=True):
+	"""Back from Paid to Payment Ready when an employee is taken off a payment entry, to be
+	paid from another bank (Finance, November 2026). The run is Paid again once everyone
+	has a submitted payment (:func:`refresh_payment_state`)."""
+	if state_of(entry) != PAID:
+		return state_of(entry)
+	entry.status = PAYMENT_READY
+	entry.paid_at = None
+	if save:
+		with transition():
+			entry.save(ignore_permissions=True)
+	return entry.status
 
 
 def refresh_payment_state(entry, save=True):
