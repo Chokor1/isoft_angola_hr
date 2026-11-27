@@ -80,6 +80,19 @@ class TestEmployeeAdvanceAccount(PayrollFixture):
 		self.assertTrue(items["advance"]["ok"])
 		self.assertNotIn("Adiantamento", items["mapping_complete"]["detail"])
 
+	def test_an_empty_adt_mapping_does_not_block_submission_for_approval(self):
+		# ISOFT, November 2026: the approval check passed but the readiness gate still
+		# refused the run with "Configuration Incomplete … Adiantamento (ADT) (Missing)".
+		from isoft_angola_hr.isoft_angola_hr.services import payroll_readiness as readiness
+
+		frappe.db.set_value("Employee", self.employee.name, "custom_salary_advance_account", self.own)
+		self.set_adt_mapping(None)
+		item = next(i for i in readiness.configuration_status(self.company) if i["key"] == "account:ADT")
+		self.assertTrue(item["ok"])
+		slip = self.make_slip(adiantamento=5000)
+		entry = frappe.get_doc("Isoft Payroll Entry", slip.payroll_entry)
+		self.assertTrue(readiness.assert_ready_to_submit(entry))
+
 	def test_paying_an_advance_debits_the_employees_own_account(self):
 		frappe.db.set_value("Employee", self.employee.name, "custom_salary_advance_account", self.own)
 		adv = frappe._dict(advance_account=None, employee=self.employee.name)

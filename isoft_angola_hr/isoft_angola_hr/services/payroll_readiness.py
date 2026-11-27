@@ -119,6 +119,15 @@ def configuration_status(company, on_date=None):
 	for comp in engine.journal_components():
 		account = mapped.get(comp["abbr"])
 		req = pa.requirement(comp["abbr"])
+		if not account and comp["abbr"] in pa.OPTIONAL_MAPPINGS:
+			# Salary advances go to each employee's own account; the Settings account is
+			# only the fallback. An advance for an employee with neither is refused by
+			# the approval check and at posting (payroll_accounts.accrual_problems).
+			add("account:" + comp["abbr"], _("Account — {0}").format(req["label"]),
+			    None, True, _("Each employee's own account (Employee → Salary Advance Account)."),
+			    required=req["required"], where=req["where"])
+			items[-1]["status"] = _("Per employee")
+			continue
 		add("account:" + comp["abbr"], _("Account — {0}").format(req["label"]),
 		    account, _account_exists(account), _("Settings → Account per Component."),
 		    required=req["required"], where=req["where"])

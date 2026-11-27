@@ -3079,3 +3079,5 @@
 "Updating payment…","A atualizar o pagamento…"
 "{0} employee(s) removed from payment {1}; re-issued as {2}.","{0} funcionário(s) retirado(s) do pagamento {1}; emitido de novo como {2}."
 "IBAN {0}","IBAN {0}"
+"Each employee's own account (Employee → Salary Advance Account).","Conta própria de cada funcionário (Funcionário → Conta de Adiantamentos (Salário))."
+"Per employee","Por funcionário"
