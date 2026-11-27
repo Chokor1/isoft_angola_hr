@@ -22,17 +22,42 @@ class IsoftSalarySlip(Document):
 
 	def autoname(self):
 		"""Salary slips: ISS-{employee}-{start_date}. Christmas bonus slips share the December
-		salary slip's dates, so they are named by year: ISN-{employee}-{year} (-2, -3… after
-		a cancelled one that was not amended)."""
-		if not self.is_bonus():
-			self.name = "ISS-{0}-{1}".format(self.employee, getdate(self.start_date))
+		salary slip's dates, so they are named by year: ISN-{employee}-{year}.
+
+		A cancelled slip keeps its name for good, so a period recalculated after its slips
+		were cancelled takes the next free -2, -3… (amendments are named by Frappe, -1).
+		The suffix is never a way round the duplicate rule: a salary slip is refused while
+		the employee has a live one starting on the same date.
+		"""
+		if self.is_bonus():
+			self.name = self._first_free_name("ISN-{0}-{1}".format(
+				self.employee, getdate(self.end_date).year))
 			return
-		base = "ISN-{0}-{1}".format(self.employee, getdate(self.end_date).year)
+		self.assert_no_live_slip_for_period()
+		self.name = self._first_free_name("ISS-{0}-{1}".format(self.employee, getdate(self.start_date)))
+
+	def _first_free_name(self, base):
 		name, n = base, 1
 		while frappe.db.exists(self.doctype, name):
 			n += 1
 			name = "{0}-{1}".format(base, n)
-		self.name = name
+		return name
+
+	def assert_no_live_slip_for_period(self):
+		"""What the bare ISS-{employee}-{start_date} name used to enforce: one draft or
+		submitted salary slip per employee and start date."""
+		live = frappe.db.sql(
+			"""select name from `tabIsoft Salary Slip`
+			where employee=%s and start_date=%s and docstatus < 2
+			  and ifnull(run_type, '') != %s limit 1""",
+			(self.employee, getdate(self.start_date), christmas.RUN_CHRISTMAS))
+		if live:
+			frappe.throw(
+				_("{0} already has Salary Slip {1} for the period starting {2}. Cancel it before "
+				  "creating another one.").format(
+					frappe.bold(self.employee_name or self.employee), live[0][0],
+					getdate(self.start_date)),
+				exc=frappe.DuplicateEntryError, title=_("Duplicate Salary Slip"))
 
 	def validate(self):
 		self.run_type = self.run_type or christmas.RUN_SALARY
